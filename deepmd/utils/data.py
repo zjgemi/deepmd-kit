@@ -18,6 +18,7 @@ from deepmd.env import (
 from deepmd.utils import random as dp_random
 from deepmd.utils.density import (
     calculate_density,
+    generate_grid,
 )
 from deepmd.utils.path import (
     DPPath,
@@ -615,23 +616,28 @@ class DeepmdData:
         else:
             dtype = GLOBAL_NP_FLOAT_PRECISION
         path = set_name / (key + ".npy")
-        if key == "grid_density" and path.is_file():
+        if key == "grid":
+            box_path = set_name / "box.npy"
+            boxes = box_path.load_numpy()
+            data = []
+            for box in boxes:
+                grid = generate_grid(box, self.density_grid_size, self.density_origin)  # [ngrids, 3]
+                data.append(grid)
+            data = np.stack(data)  # [nframes, ngrids, 3]
+            return np.float32(1.0), data
+        if key == "density" and path.is_file():
             path_list = path.load_numpy()
             data = []
             for path in path_list:
                 filename = set_name / path
-                grids = []
                 densities = []
-                for batch_grids, batch_densities in calculate_density(
+                for _, batch_densities in calculate_density(
                     filename, self.density_grid_size, self.density_origin
                 ):
-                    grids.append(batch_grids)
                     densities.append(batch_densities)
-                grids = np.concatenate(grids)  # [ngrids, 3]
                 densities = np.concatenate(densities)  # [ngrids]
-                grid_densities = np.concatenate([grids, densities.reshape([-1, 1])], axis=1)  # [ngrids, 4]
-                data.append(grid_densities)
-            data = np.stack(data)  # [nframes, ngrids, 4]
+                data.append(densities)
+            data = np.stack(data)  # [nframes, ngrids]
             return np.float32(1.0), data
         elif path.is_file():
             data = path.load_numpy().astype(dtype)
