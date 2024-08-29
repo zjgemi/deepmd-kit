@@ -621,18 +621,23 @@ class DeepmdData:
             boxes = box_path.load_numpy()
             data = []
             for box in boxes:
+                box = box.reshape(3,3)
                 grid = generate_grid(box, self.density_grid_size, self.density_origin)  # [ngrids, 3]
                 data.append(grid)
             data = np.stack(data)  # [nframes, ngrids, 3]
             return np.float32(1.0), data
         elif key == "density" and path.is_file():
             path_list = path.load_numpy()
+            box_path = set_name / "box.npy"
+            boxes = box_path.load_numpy()
             data = []
-            for path in path_list:
+            for idx, path in enumerate(path_list):
                 filename = set_name / path[0]
                 densities = []
+                box = boxes[idx]
+                box = box.reshape(3,3)
                 for _, batch_densities in calculate_density(
-                    filename, self.density_grid_size, self.density_origin
+                    str(filename), box, self.density_grid_size, self.density_origin
                 ):
                     densities.append(batch_densities)
                 densities = np.concatenate(densities)  # [ngrids]

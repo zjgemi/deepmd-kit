@@ -19,28 +19,37 @@ class DensityCalculator:
         self.read_binary_file(filename)
 
     def read_binary_file(self, filename: str):
-        # the func will be further modified when PR 4991 are merged.
-        with open(filename, "rb") as f:
-            # Read header
-            self.gammaonly = np.fromfile(f, dtype=bool, count=1)[0]
-            self.ngm_g, self.nspin = np.fromfile(f, dtype=np.int32, count=2)
+        with open(filename, 'rb') as f:
+        # Read first '3' which is a single integer
+            header_value = np.fromfile(f, dtype=np.int32, count=1)[0]
+            assert header_value == 3, f"Unexpected header value: {header_value}"
 
-            # Read reciprocal lattice vectors
+        # Read the rest of the header information
+            self.gammaonly, self.ngm_g, self.nspin = np.fromfile(f, dtype=np.int32, count=3)
+        
+        # Skip the last '3' in the first line, which can be done by reading and ignoring it
+            _ = np.fromfile(f, dtype=np.int32, count=1)[0]
+
+        # Read reciprocal lattice vectors
+            header_value = np.fromfile(f, dtype=np.int32, count=1)[0]
+            assert header_value == 9, f"Unexpected header value: {header_value}"
             self.bmat = np.fromfile(f, dtype=np.float64, count=9).reshape(3, 3)
+         # Skip the last '9' in the first line, which can be done by reading and ignoring it    
+            _ = np.fromfile(f, dtype=np.int32, count=1)
 
-            # Read Miller indices
-            self.miller_indices = np.fromfile(
-                f, dtype=np.int32, count=self.ngm_g * 3
-            ).reshape(self.ngm_g, 3)
+        # Read Miller indices
+            self.miller_indices = np.fromfile(f, dtype=np.int32, count=self.ngm_g*3).reshape(self.ngm_g, 3)
 
-            # Read rhog
+        # Read rhog
             self.rhog = np.fromfile(f, dtype=np.complex128, count=self.ngm_g)
 
-            # If nspin == 2, read second spin component (we'll ignore it for now)
+        # If nspin == 2, read second spin component
             if self.nspin == 2:
-                _ = np.fromfile(f, dtype=np.complex128, count=self.ngm_g)
+                self.rhog_spin2 = np.fromfile(f, dtype=np.complex128, count=self.ngm_g)
+            else:
+                self.rhog_spin2 = None
 
-        # Calculate cell volume and G vectors
+    # Calculate cell volume and G vectors
         self.cell_volume = np.abs(np.linalg.det(self.bmat))
         self.g_vectors = 2 * np.pi * np.dot(self.miller_indices, self.bmat.T)
 
@@ -82,6 +91,7 @@ def generate_grid(
 
 def calculate_density(
     filename: str,
+    lattice_vectors: np.ndarray,
     grid_size: Tuple[int, int, int],
     origin: np.ndarray = np.zeros(3),
     batch_size: int = 1000,
@@ -93,6 +103,7 @@ def calculate_density(
     filename (str): 包含 n(G) 数据的二进制文件路径
     grid_size (Tuple[int, int, int]): 三个方向上的网格点数
     origin (np.ndarray): 网格原点坐标，默认为 (0, 0, 0)
+    lattice_vectors (np.ndarray): 形状为 (3, 3) 的晶格向量
     batch_size (int): 每批处理的点数
 
     返回:
@@ -100,7 +111,7 @@ def calculate_density(
     """
     calculator = DensityCalculator(filename)
 
-    points = generate_grid(calculator.lattice_vectors, grid_size, origin)
+    points = generate_grid(lattice_vectors, grid_size, origin)
 
     for i in range(0, len(points), batch_size):
         batch_points = points[i : i + batch_size]

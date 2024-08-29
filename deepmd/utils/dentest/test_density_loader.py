@@ -17,7 +17,6 @@ class TestDensityDataLoader(unittest.TestCase):
         data.add("density", 1, atomic=False, must=True, high_prec=False)
         
         # Load the data
-        print(os.path.join(self.test_dir, "set.000"))
         loaded_data = data._load_set(os.path.join(self.test_dir, "set.000"))
 
         # Check if density data is loaded correctly
