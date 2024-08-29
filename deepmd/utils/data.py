@@ -629,7 +629,7 @@ class DeepmdData:
             path_list = path.load_numpy()
             data = []
             for path in path_list:
-                filename = set_name / path
+                filename = set_name / path[0]
                 densities = []
                 for _, batch_densities in calculate_density(
                     filename, self.density_grid_size, self.density_origin

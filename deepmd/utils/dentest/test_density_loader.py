@@ -55,7 +55,7 @@ class TestDensityDataLoader(unittest.TestCase):
 
         # Check if grid data has the correct shape in the batch
         self.assertIn("grid", batch_data)
-        self.assertEqual(batch_data["grid"].shape, (1, 1000, 3))
+        self.assertEqual(batch_data["grid"].shape, (100, 1000, 3))
 
 if __name__ == '__main__':
     unittest.main()
