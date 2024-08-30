@@ -5,7 +5,7 @@ from typing import (
 )
 
 import numpy as np
-
+from scipy.special import logsumexp
 
 class DensityCalculator:
     def __init__(self, filename):
@@ -20,44 +20,88 @@ class DensityCalculator:
 
     def read_binary_file(self, filename: str):
         with open(filename, 'rb') as f:
-        # Read first '3' which is a single integer
-            header_value = np.fromfile(f, dtype=np.int32, count=1)[0]
-            assert header_value == 3, f"Unexpected header value: {header_value}"
-
-        # Read the rest of the header information
+            # Read header
+            size = np.fromfile(f, dtype=np.int32, count=1)[0]
+            assert size == 3, f"Unexpected header value: {size}"
+            
             self.gammaonly, self.ngm_g, self.nspin = np.fromfile(f, dtype=np.int32, count=3)
-        
-        # Skip the last '3' in the first line, which can be done by reading and ignoring it
-            _ = np.fromfile(f, dtype=np.int32, count=1)[0]
+            _ = np.fromfile(f, dtype=np.int32, count=1)[0]  # Skip the last '3'
 
-        # Read reciprocal lattice vectors
-            header_value = np.fromfile(f, dtype=np.int32, count=1)[0]
-            assert header_value == 9, f"Unexpected header value: {header_value}"
+            # Read reciprocal lattice vectors
+            size = np.fromfile(f, dtype=np.int32, count=1)[0]
+            assert size == 9, f"Unexpected header value: {size}"
             self.bmat = np.fromfile(f, dtype=np.float64, count=9).reshape(3, 3)
-         # Skip the last '9' in the first line, which can be done by reading and ignoring it    
-            _ = np.fromfile(f, dtype=np.int32, count=1)
+            _ = np.fromfile(f, dtype=np.int32, count=1)[0]  # Skip the last '9'
 
-        # Read Miller indices
+            # Read Miller indices
+            size = np.fromfile(f, dtype=np.int32, count=1)[0]
+            assert size == self.ngm_g * 3, f"Unexpected Miller indices size: {size}"
             self.miller_indices = np.fromfile(f, dtype=np.int32, count=self.ngm_g*3).reshape(self.ngm_g, 3)
+            _ = np.fromfile(f, dtype=np.int32, count=1)[0]  # Skip the size at the end
 
-        # Read rhog
+            # Read rhog
+            size = np.fromfile(f, dtype=np.int32, count=1)[0]
+            assert size == self.ngm_g, f"Unexpected rhog size: {size}"
             self.rhog = np.fromfile(f, dtype=np.complex128, count=self.ngm_g)
+            _ = np.fromfile(f, dtype=np.int32, count=1)[0]  # Skip the size at the end
 
-        # If nspin == 2, read second spin component
+            # If nspin == 2, read second spin component
             if self.nspin == 2:
+                size = np.fromfile(f, dtype=np.int32, count=1)[0]
+                assert size == self.ngm_g, f"Unexpected rhog_spin2 size: {size}"
                 self.rhog_spin2 = np.fromfile(f, dtype=np.complex128, count=self.ngm_g)
-            else:
-                self.rhog_spin2 = None
+                _ = np.fromfile(f, dtype=np.int32, count=1)[0]  # Skip the size at the end
 
-    # Calculate cell volume and G vectors
+        # Calculate cell volume
         self.cell_volume = np.abs(np.linalg.det(self.bmat))
+        
+        # Calculate G vectors
         self.g_vectors = 2 * np.pi * np.dot(self.miller_indices, self.bmat.T)
+    
+    def print_read_results(self):
+        print("Python Read Results:")
+        print(f"gamma_only: {self.gammaonly}")
+        print(f"ngm_g: {self.ngm_g}")
+        print(f"nspin: {self.nspin}")
+        
+        print("Reciprocal lattice vectors:")
+        for i in range(3):
+            print(f"  b{i+1}: {self.bmat[i,0]:.6f} {self.bmat[i,1]:.6f} {self.bmat[i,2]:.6f}")
+        
+        print("First 10 Miller indices:")
+        for i in range(min(10, self.ngm_g)):
+            print(f"  {self.miller_indices[i,0]} {self.miller_indices[i,1]} {self.miller_indices[i,2]}")
+        
+        print("First 10 rhog values:")
+        for i in range(min(10, self.ngm_g)):
+            print(f"  {self.rhog[i].real:.6e} + {self.rhog[i].imag:.6e}i")
+        
+        if self.nspin == 2:
+            print("First 10 rhog_spin2 values:")
+            for i in range(min(10, self.ngm_g)):
+                print(f"  {self.rhog_spin2[i].real:.6e} + {self.rhog_spin2[i].imag:.6e}i")
+    def output_to_files(self):
+        # Output Miller indices to file
+        np.savetxt('miller_indices_python.txt', self.miller_indices, fmt='%d')
+
+        # Output rhog to file
+        with open('rhog_python.txt', 'w') as f:
+            f.write("Spin 0:\n")
+            for value in self.rhog:
+                f.write(f"{value.real} {value.imag}\n")
+            
+            if self.nspin == 2:
+                f.write("Spin 1:\n")
+                for value in self.rhog_spin2:
+                    f.write(f"{value.real} {value.imag}\n")
+
+        print("Python data has been written to miller_indices_python.txt and rhog_python.txt")
 
     def calculate_density_batch(self, points: np.ndarray) -> np.ndarray:
         phases = np.exp(1j * np.dot(points, self.g_vectors.T))
         densities = np.real(np.dot(phases, self.rhog)) / self.cell_volume
         return densities
-
+    
 
 def generate_grid(
     lattice_vectors: np.ndarray,
