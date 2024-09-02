@@ -583,6 +583,7 @@ class DeepmdData:
         dtype: Optional[np.dtype] = None,
         output_natoms_for_type_sel: bool = False,
     ):
+        grid_num_data = key in ["grid", "density"]
         if atomic:
             natoms = self.natoms
             idx_map = self.idx_map
@@ -595,7 +596,7 @@ class DeepmdData:
             else:
                 natoms_sel = natoms
                 idx_map_sel = idx_map
-            ndof = ndof_ * natoms
+            ndof = ndof_ * natoms if not grid_num_data else ndof_
         else:
             ndof = ndof_
             natoms_sel = 0
@@ -611,6 +612,11 @@ class DeepmdData:
             data = path.load_numpy().astype(dtype)
             try:  # YWolfeee: deal with data shape error
                 if atomic:
+                    if grid_num_data:
+                        data = data.reshape([nframes, -1, ndof])
+                        natoms = data.shape[1]
+                        ndof = ndof * natoms
+                        idx_map = np.arange(natoms)  # pylint: disable=no-explicit-dtype
                     if type_sel is not None:
                         # check the data shape is nsel or natoms
                         if data.size == nframes * natoms_sel * ndof_:

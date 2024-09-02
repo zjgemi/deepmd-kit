@@ -298,6 +298,7 @@ class DescrptDPA1(BaseDescriptor, torch.nn.Module):
         self.use_econf_tebd = use_econf_tebd
         self.use_tebd_bias = use_tebd_bias
         self.type_map = type_map
+        self.axis_neuron = axis_neuron
         self.type_embedding = TypeEmbedNet(
             ntypes,
             tebd_dim,

@@ -30,6 +30,9 @@ from deepmd.utils.spin import (
     Spin,
 )
 
+from .density_model import (
+    GridDensityModel,
+)
 from .dipole_model import (
     DipoleModel,
 )
@@ -165,6 +168,8 @@ def get_standard_model(model_params):
     if fitting_net["type"] in ["dipole", "polar"]:
         fitting_net["embedding_width"] = descriptor.get_dim_emb()
     fitting_net["dim_descrpt"] = descriptor.get_dim_out()
+    if fitting_net["type"] == "density":
+        fitting_net["dim_descrpt"] = fitting_net["dim_descrpt"] * descriptor.axis_neuron
     grad_force = "direct" not in fitting_net["type"]
     if not grad_force:
         fitting_net["out_dim"] = descriptor.get_dim_emb()
@@ -182,6 +187,8 @@ def get_standard_model(model_params):
         modelcls = DOSModel
     elif fitting_net["type"] in ["ener", "direct_force_ener"]:
         modelcls = EnergyModel
+    elif fitting_net["type"] == "density":
+        modelcls = GridDensityModel
     else:
         raise RuntimeError(f"Unknown fitting type: {fitting_net['type']}")
 

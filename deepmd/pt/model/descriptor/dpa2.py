@@ -156,6 +156,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
 
         self.repinit_args = init_subclass_params(repinit, RepinitArgs)
         self.repformer_args = init_subclass_params(repformer, RepformerArgs)
+        self.axis_neuron = self.repinit_args.axis_neuron
 
         self.repinit = DescrptBlockSeAtten(
             self.repinit_args.rcut,

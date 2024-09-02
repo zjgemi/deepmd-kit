@@ -8,6 +8,9 @@ from .base_fitting import (
 from .denoise import (
     DenoiseNet,
 )
+from .density import (
+    DensityFittingNet,
+)
 from .dipole import (
     DipoleFittingNet,
 )
@@ -39,4 +42,5 @@ __all__ = [
     "TypePredictNet",
     "PolarFittingNet",
     "DOSFittingNet",
+    "DensityFittingNet",
 ]

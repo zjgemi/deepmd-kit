@@ -28,6 +28,7 @@ from deepmd.pt.loss import (
     DOSLoss,
     EnergySpinLoss,
     EnergyStdLoss,
+    GridDensityLoss,
     TensorLoss,
 )
 from deepmd.pt.model.model import (
@@ -1104,6 +1105,7 @@ class Trainer:
             "coord",
             "atype",
             "spin",
+            "grid",
             "box",
             "fparam",
             "aparam",
@@ -1239,6 +1241,9 @@ def get_loss(loss_params, start_lr, _ntypes, _model):
         loss_params["label_name"] = label_name
         loss_params["tensor_name"] = label_name
         return TensorLoss(**loss_params)
+    elif loss_type == "grid_density":
+        loss_params["starter_learning_rate"] = start_lr
+        return GridDensityLoss(**loss_params)
     else:
         raise NotImplementedError
 
