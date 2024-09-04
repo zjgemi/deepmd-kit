@@ -144,6 +144,12 @@ def get_trainer(
                 validation_dataset_params["batch_size"],
                 model_params_single["type_map"],
                 seed=rank_seed,
+                density_grid_size=validation_dataset_params.get(
+                    "density_grid_size", (5, 5, 5)
+                ),
+                density_origin=validation_dataset_params.get(
+                    "density_origin", [0.0, 0.0, 0.0]
+                ),
             )
             if validation_systems
             else None
@@ -153,6 +159,12 @@ def get_trainer(
             training_dataset_params["batch_size"],
             model_params_single["type_map"],
             seed=rank_seed,
+            density_grid_size=training_dataset_params.get(
+                "density_grid_size", (5, 5, 5)
+            ),
+            density_origin=training_dataset_params.get(
+                "density_origin", [0.0, 0.0, 0.0]
+            ),
         )
         return (
             train_data_single,

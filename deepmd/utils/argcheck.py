@@ -2428,6 +2428,16 @@ If MPI is used, the value should be considered as the batch size per task.'
             doc=doc_batch_size,
         ),
         Argument(
+            "density_grid_size",
+            [List[int]],
+            optional=True,
+        ),
+        Argument(
+            "density_origin",
+            [List[float]],
+            optional=True,
+        ),
+        Argument(
             "auto_prob",
             str,
             optional=True,
@@ -2492,6 +2502,16 @@ def validation_data_args():  # ! added by Ziyao: new specification style for dat
             optional=True,
             default="auto",
             doc=doc_batch_size,
+        ),
+        Argument(
+            "density_grid_size",
+            [List[int]],
+            optional=True,
+        ),
+        Argument(
+            "density_origin",
+            [List[float]],
+            optional=True,
         ),
         Argument(
             "auto_prob",

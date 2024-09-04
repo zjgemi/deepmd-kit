@@ -11,6 +11,7 @@ from threading import (
 )
 from typing import (
     List,
+    Tuple,
 )
 
 import h5py
@@ -79,6 +80,8 @@ class DpLoaderSet(Dataset):
         type_map,
         seed=None,
         shuffle=True,
+        density_grid_size: Tuple[int, int, int] = (5, 5, 5),
+        density_origin: np.ndarray = np.zeros(3, dtype=np.float32),
     ):
         if seed is not None:
             setup_seed(seed)
@@ -94,6 +97,8 @@ class DpLoaderSet(Dataset):
             return DeepmdDataSetForLoader(
                 system=system,
                 type_map=type_map,
+                density_grid_size=density_grid_size,
+                density_origin=density_origin,
             )
 
         with Pool(

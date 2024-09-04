@@ -63,8 +63,8 @@ class DeepmdData:
         modifier=None,
         trn_all_set: bool = False,
         sort_atoms: bool = True,
-        density_grid_size: Tuple[int, int, int] = (100, 100, 100),
-        density_origin: np.ndarray = np.zeros(3),
+        density_grid_size: Tuple[int, int, int] = (5, 5, 5),
+        density_origin: np.ndarray = np.zeros(3, dtype=np.float32),
     ):
         """Constructor."""
         root = DPPath(sys_path)
@@ -133,8 +133,8 @@ class DeepmdData:
         self.nframes = np.sum(frames_list)
         # The prefix sum stores the range of indices contained in each directory, which is needed by get_item method
         self.prefix_sum = np.cumsum(frames_list).tolist()
-        self.density_grid_size = density_grid_size
-        self.density_origin = density_origin
+        self.density_grid_size = tuple(density_grid_size)
+        self.density_origin = np.array(density_origin)
 
     def add(
         self,
@@ -621,8 +621,10 @@ class DeepmdData:
             boxes = box_path.load_numpy()
             data = []
             for box in boxes:
-                box = box.reshape(3,3)
-                grid = generate_grid(box, self.density_grid_size, self.density_origin)  # [ngrids, 3]
+                box = box.reshape(3, 3)
+                grid = generate_grid(
+                    box, self.density_grid_size, self.density_origin
+                )  # [ngrids, 3]
                 data.append(grid)
             data = np.stack(data)  # [nframes, ngrids, 3]
             return np.float32(1.0), data
@@ -635,7 +637,7 @@ class DeepmdData:
                 filename = set_name / path[0]
                 densities = []
                 box = boxes[idx]
-                box = box.reshape(3,3)
+                box = box.reshape(3, 3)
                 for _, batch_densities in calculate_density(
                     str(filename), box, self.density_grid_size, self.density_origin
                 ):
