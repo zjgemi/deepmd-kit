@@ -1,0 +1,13 @@
+INPUT_PARAMETERS
+calculation scf
+ecutwfc 100.000000
+scf_thr 1.000000e-07
+scf_nmax 100
+basis_type pw
+dft_functional pbe
+gamma_only 0
+kspacing 0.1
+symmetry 0
+mixing_beta 0.1
+out_chg 1 7
+ks_solver dav_subspace

@@ -1,0 +1,12 @@
+{
+    "job_name": "MgAlCu",
+    "command": "bash -c \"mpirun -n 16 /usr/local/bin/abacus > log \"",
+    "log_file": "log",
+    "backward_files": [],
+    "project_id": 27666,
+    "platform": "ali",
+    "disk_size": 40,
+    "machine_type": "c32_m64_cpu",
+    "image_name": "registry.dp.tech/dptech/prod-18431/abacus-outchg:v4",
+    "job_type": "container"
+}
