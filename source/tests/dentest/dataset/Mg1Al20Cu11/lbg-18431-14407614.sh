@@ -1,1 +1,0 @@
-bash -c "mpirun -n 16 /usr/local/bin/abacus > log "
