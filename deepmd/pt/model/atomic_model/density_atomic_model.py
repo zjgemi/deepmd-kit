@@ -41,6 +41,8 @@ class DPDensityAtomicModel(DPAtomicModel):
         self.rcut = self.descriptor.get_rcut()
         self.rcut_smth = self.descriptor.get_rcut_smth()
         self.env_protection = self.descriptor.get_env_protection()
+        if self.env_protection == 0.0:
+            self.env_protection = 1e-6
         self.sel = self.descriptor.get_sel()
         self.nnei = self.descriptor.get_nsel()
         self.axis_neuron = self.descriptor.axis_neuron
