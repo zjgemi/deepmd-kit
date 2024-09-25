@@ -128,6 +128,7 @@ class DPDensityAtomicModel(DPAtomicModel):
         # 2. nb x ngrid x nnei x 4
         h2 = dmatrix
         nall = extended_coord.view(nframes, -1).shape[1] // 3
+        assert mapping is not None  # need fix for comm_dict
         mapping = (
             mapping.view(nframes, nall)
             .unsqueeze(-1)
@@ -202,6 +203,9 @@ class DPDensityAtomicModel(DPAtomicModel):
             ret_dict["mask"][ff,ii] == 0 indicating the ii-th atom of the ff-th frame is virtual.
 
         """
+        assert grid is not None
+        assert grid_type is not None
+        assert grid_nlist is not None
         _, nloc, _ = nlist.shape
         _, ngrid, _ = grid_nlist.shape
         atype = extended_atype[:, :nloc]

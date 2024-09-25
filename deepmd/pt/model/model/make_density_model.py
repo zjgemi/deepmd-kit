@@ -106,9 +106,9 @@ def make_density_model(T_AtomicModel: Type[BaseAtomicModel]):
         # cannot use the name forward. torch script does not work
         def forward_common(
             self,
-            coord,
-            atype,
-            grid,
+            coord: torch.Tensor,
+            atype: torch.Tensor,
+            grid: torch.Tensor,
             box: Optional[torch.Tensor] = None,
             fparam: Optional[torch.Tensor] = None,
             aparam: Optional[torch.Tensor] = None,
@@ -142,6 +142,7 @@ def make_density_model(T_AtomicModel: Type[BaseAtomicModel]):
                 The keys are defined by the `ModelOutputDef`.
 
             """
+            assert grid is not None
             cc, gg, bb, fp, ap, input_prec = self.input_type_cast(
                 coord, grid, box=box, fparam=fparam, aparam=aparam
             )
@@ -275,6 +276,7 @@ def make_density_model(T_AtomicModel: Type[BaseAtomicModel]):
             nlist = self.format_nlist(
                 extended_coord, extended_atype, nlist, extra_nlist_sort=extra_nlist_sort
             )
+            assert grid is not None
             cc_ext, gg, _, fp, ap, input_prec = self.input_type_cast(
                 extended_coord, grid, fparam=fparam, aparam=aparam
             )
@@ -333,6 +335,7 @@ def make_density_model(T_AtomicModel: Type[BaseAtomicModel]):
                 for vv in [grid, box, fparam, aparam]
             ]
             grid, box, fparam, aparam = _lst
+            assert grid is not None
             if (
                 input_prec
                 == self.reverse_precision_dict[self.global_pt_float_precision]
