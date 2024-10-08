@@ -110,7 +110,6 @@ class DPDensityAtomicModel(DPAtomicModel):
         assert grid_nlist is not None
         bsz, ngrid, nnei = grid_nlist.shape
         grid_nlist_mask = grid_nlist >= 0
-        grid_nlist_masked = torch.where(grid_nlist_mask, grid_nlist, 0)
         merged_coord = torch.cat([grid, extended_coord], dim=1)
         shifted_nlist = torch.where(grid_nlist_mask, grid_nlist + ngrid, -1)
         dmatrix, diff, sw = prod_env_mat(
@@ -129,33 +128,76 @@ class DPDensityAtomicModel(DPAtomicModel):
         h2 = dmatrix
         nall = extended_coord.view(nframes, -1).shape[1] // 3
         assert mapping is not None  # need fix for comm_dict
-        mapping = (
+        mapping_ng1 = (
             mapping.view(nframes, nall)
             .unsqueeze(-1)
             .expand(-1, -1, self.descriptor.get_dim_out())
         )
         # nb x nall x ng1
-        g1_ext = torch.gather(descriptor, 1, mapping)
-        # nb x ngrid x nnei x ng1
-        gg1 = _make_nei_g1(g1_ext, grid_nlist_masked)
+        g1_ext = torch.gather(descriptor, 1, mapping_ng1)
 
-        # nb x ngrid x 3/4 x ng1
-        h2g1 = RepformerLayer._cal_hg(
-            gg1, h2, grid_nlist_mask, sw.squeeze(-1), smooth=True, epsilon=1e-4
+        # h2: nb x ngrid x nnei x 4
+        # electron-to-atom equivariant feature: nb x ngrid x nnei x 4 x ng1
+        # e2aef = embedding_net(extended_atype, h2)
+        ng1 = self.descriptor.get_dim_out()
+        e2aef = h2.unsqueeze(-1).expand(-1, -1, -1, -1, ng1)
+
+        dmatrix, diff, sw = prod_env_mat(
+            extended_coord,
+            nlist,
+            atype,
+            self.mean,
+            self.stddev,
+            self.rcut,
+            self.rcut_smth,
+            protection=self.env_protection,
         )
-        # nb x ngrid x (axisxng1)
-        grid_descriptor = RepformerLayer._cal_grrg(h2g1, self.axis_neuron)
-        # energy, force
+        # nb x nloc x nnei x 4
+        h2 = dmatrix
+        # nb x nloc x nnei x ng1
+        gg1 = _make_nei_g1(g1_ext, nlist)
+        nlist_mask = nlist >= 0
+        # nb x nloc x 4 x ng1
+        h2g1 = RepformerLayer._cal_hg(
+            gg1, h2, nlist_mask, sw.squeeze(-1), smooth=True, epsilon=1e-4
+        )
+
+        grid_nlist_0 = torch.where(grid_nlist_mask, grid_nlist, 0)
+        # nb x (ngrid*nnei)
+        grid_nlist_loc = torch.gather(mapping, 1, grid_nlist_0.view(nframes, ngrid*nnei))
+        # nb x (ngrid*nnei) x 4 x ng1
+        grid_nlist_expanded = grid_nlist_loc.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 4, ng1)
+        # atomic equivariant feature: nb x ngrid x nnei x 4 x ng1
+        aef = torch.gather(h2g1, 1, grid_nlist_expanded).view(nframes, ngrid, nnei, 4, ng1)
+        aef = torch.where(grid_nlist_mask.unsqueeze(-1).unsqueeze(-1), aef, 0)
+        # electron-to-atom invariant feature: nb x ngrid x nnei x ng1
+        e2aif = torch.sum(e2aef*aef, -2)
+
+        # atomic invariant feature: nb x ngrid x nnei x ng1
+        grid_nlist_expanded = grid_nlist_loc.unsqueeze(-1).expand(-1, -1, ng1)
+        aif = torch.gather(descriptor, 1, grid_nlist_expanded).view(nframes, ngrid, nnei, ng1)
+        aif = torch.where(grid_nlist_mask.unsqueeze(-1), aif, 0)
+        # electron-and-atom invariant feature: nb x ngrid x nnei x ng1
+        new_descriptor = e2aif + aif
+
         fit_ret = self.fitting_net(
-            grid_descriptor,
-            grid_type,
+            new_descriptor.view(nframes, ngrid*nnei, ng1),
+            torch.zeros([nframes, ngrid*nnei], device=grid_type.device, dtype=grid_type.dtype),
             gr=rot_mat,
             g2=g2,
             h2=h2,
             fparam=fparam,
             aparam=aparam,
         )
-        return fit_ret
+        # nb x ngrid x nnei x 1
+        nei_density = fit_ret["density"].view(nframes, ngrid, nnei, 1)
+        nei_density = torch.where(grid_nlist_mask.unsqueeze(-1), nei_density, 0)
+        # nb x ngrid x 1
+        grid_density = torch.sum(torch.exp(nei_density), -2)
+        ret = {
+            "density": grid_density,
+        }
+        return ret
 
     def forward_common_atomic(
         self,
