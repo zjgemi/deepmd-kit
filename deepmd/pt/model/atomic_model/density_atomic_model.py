@@ -17,6 +17,9 @@ from deepmd.pt.model.descriptor.repformer_layer import (
     RepformerLayer,
     _make_nei_g1,
 )
+from deepmd.pt.model.network.mlp import (
+    MLPLayer,
+)
 from deepmd.pt.model.task.density import (
     DensityFittingNet,
 )
@@ -46,6 +49,14 @@ class DPDensityAtomicModel(DPAtomicModel):
         self.sel = self.descriptor.get_sel()
         self.nnei = self.descriptor.get_nsel()
         self.axis_neuron = self.descriptor.axis_neuron
+        neurons = []
+        dims = [1 + self.descriptor.repinit_args.tebd_dim] + neurons + [self.descriptor.get_dim_out()]
+        self.grid_embedding_layers = [MLPLayer(
+            dims[i],
+            dims[i+1],
+            precision=env.DEFAULT_PRECISION,
+            activation_function="tanh",
+        ) for i in range(len(neurons)+1)]
 
         wanted_shape = (1, self.nnei, 4)
         mean = torch.zeros(
@@ -136,11 +147,23 @@ class DPDensityAtomicModel(DPAtomicModel):
         # nb x nall x ng1
         g1_ext = torch.gather(descriptor, 1, mapping_ng1)
 
-        # h2: nb x ngrid x nnei x 4
-        # electron-to-atom equivariant feature: nb x ngrid x nnei x 4 x ng1
-        # e2aef = embedding_net(extended_atype, h2)
         ng1 = self.descriptor.get_dim_out()
-        e2aef = h2.unsqueeze(-1).expand(-1, -1, -1, -1, ng1)
+        # nb x nall x ntebd
+        tebd = self.descriptor.type_embedding(extended_atype)
+        ntebd = tebd.shape[-1]
+        grid_nlist_0 = torch.where(grid_nlist_mask, grid_nlist, 0)
+        grid_nlist_expanded = grid_nlist_0.view(nframes, ngrid*nnei).unsqueeze(-1).expand(-1, -1, ntebd)
+        # nb x ngrid x nnei x ntebd
+        grid_tebd = torch.gather(tebd, 1, grid_nlist_expanded).view(nframes, ngrid, nnei, ntebd)
+        grid_tebd = torch.where(grid_nlist_mask.unsqueeze(-1), grid_tebd, 0)
+        # nb x ngrid x nnei x (1+ntebd)
+        h2_and_type = torch.concat([h2[:, :, :, :1], grid_tebd], -1)
+        # nb x ngrid x nnei x ng1
+        gg = h2_and_type
+        for layer in self.grid_embedding_layers:
+            gg = layer(gg)
+        # electron-to-atom equivariant feature: nb x ngrid x nnei x 4 x ng1
+        e2aef = h2.unsqueeze(-1) * gg.unsqueeze(-2)
 
         dmatrix, diff, sw = prod_env_mat(
             extended_coord,
@@ -157,7 +180,8 @@ class DPDensityAtomicModel(DPAtomicModel):
         nlist_mask = nlist >= 0
         nlist_0 = torch.where(nlist_mask, nlist, 0)
         # nb x nloc x nnei x ng1
-        gg1 = _make_nei_g1(g1_ext, nlist_0)        # nb x nloc x 4 x ng1
+        gg1 = _make_nei_g1(g1_ext, nlist_0)
+        # nb x nloc x 4 x ng1
         h2g1 = RepformerLayer._cal_hg(
             gg1, h2, nlist_mask, sw.squeeze(-1), smooth=True, epsilon=1e-4
         )
