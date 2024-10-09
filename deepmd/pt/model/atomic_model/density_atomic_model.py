@@ -146,18 +146,18 @@ class DPDensityAtomicModel(DPAtomicModel):
             extended_coord,
             nlist,
             atype,
-            self.mean,
-            self.stddev,
+            self.descriptor.repinit.mean,
+            self.descriptor.repinit.stddev,
             self.rcut,
             self.rcut_smth,
             protection=self.env_protection,
         )
         # nb x nloc x nnei x 4
         h2 = dmatrix
-        # nb x nloc x nnei x ng1
-        gg1 = _make_nei_g1(g1_ext, nlist)
         nlist_mask = nlist >= 0
-        # nb x nloc x 4 x ng1
+        nlist_0 = torch.where(nlist_mask, nlist, 0)
+        # nb x nloc x nnei x ng1
+        gg1 = _make_nei_g1(g1_ext, nlist_0)        # nb x nloc x 4 x ng1
         h2g1 = RepformerLayer._cal_hg(
             gg1, h2, nlist_mask, sw.squeeze(-1), smooth=True, epsilon=1e-4
         )
