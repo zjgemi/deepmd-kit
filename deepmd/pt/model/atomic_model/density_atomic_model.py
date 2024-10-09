@@ -190,10 +190,10 @@ class DPDensityAtomicModel(DPAtomicModel):
             aparam=aparam,
         )
         # nb x ngrid x nnei x 1
-        nei_density = fit_ret["density"].view(nframes, ngrid, nnei, 1)
+        nei_density = torch.exp(fit_ret["density"].view(nframes, ngrid, nnei, 1))
         nei_density = torch.where(grid_nlist_mask.unsqueeze(-1), nei_density, 0)
         # nb x ngrid x 1
-        grid_density = torch.sum(torch.exp(nei_density), -2)
+        grid_density = torch.sum(nei_density, -2)
         ret = {
             "density": grid_density,
         }
