@@ -201,11 +201,11 @@ class DPDensityAtomicModel(DPAtomicModel):
         grid_nlist_expanded = grid_nlist_loc.unsqueeze(-1).expand(-1, -1, ng1)
         aif = torch.gather(descriptor, 1, grid_nlist_expanded).view(nframes, ngrid, nnei, ng1)
         aif = torch.where(grid_nlist_mask.unsqueeze(-1), aif, 0)
-        # electron-and-atom invariant feature: nb x ngrid x nnei x ng1
-        new_descriptor = e2aif + aif
+        # electron-and-atom invariant feature: nb x ngrid x nnei x (ng1*2)
+        new_descriptor = torch.concat([aif, e2aif], 3)
 
         fit_ret = self.fitting_net(
-            new_descriptor.view(nframes, ngrid*nnei, ng1),
+            new_descriptor.view(nframes, ngrid*nnei, ng1*2),
             torch.zeros([nframes, ngrid*nnei], device=grid_type.device, dtype=grid_type.dtype),
             gr=rot_mat,
             g2=g2,

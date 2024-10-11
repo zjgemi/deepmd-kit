@@ -169,7 +169,7 @@ def get_standard_model(model_params):
         fitting_net["embedding_width"] = descriptor.get_dim_emb()
     fitting_net["dim_descrpt"] = descriptor.get_dim_out()
     if fitting_net["type"] == "density":
-        fitting_net["dim_descrpt"] = fitting_net["dim_descrpt"] * descriptor.axis_neuron
+        fitting_net["dim_descrpt"] = fitting_net["dim_descrpt"] * 2
     grad_force = "direct" not in fitting_net["type"]
     if not grad_force:
         fitting_net["out_dim"] = descriptor.get_dim_emb()
