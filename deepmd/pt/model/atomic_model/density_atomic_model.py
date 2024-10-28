@@ -9,6 +9,7 @@ from typing import (
 )
 
 import torch
+import torch.nn as nn
 
 from deepmd.pt.model.descriptor.env_mat import (
     prod_env_mat,
@@ -50,16 +51,22 @@ class DPDensityAtomicModel(DPAtomicModel):
         self.nnei = self.descriptor.get_nsel()
         self.axis_neuron = self.descriptor.axis_neuron
 
-        # Get the grid_embedding_neurons from the fitting instance
-        self.grid_embedding_neurons = fitting.grid_embedding_neurons if hasattr(fitting, 'grid_embedding_neurons') else []
-        
-        dims = [1 + self.descriptor.repinit_args.tebd_dim] + self.grid_embedding_neurons + [self.descriptor.get_dim_out()]
-        self.grid_embedding_layers = [MLPLayer(
-            dims[i],
-            dims[i+1],
-            precision=env.DEFAULT_PRECISION,
-            activation_function="tanh",
-        ) for i in range(len(self.grid_embedding_neurons) + 1)]
+        # Initialize grid embedding layers if specified
+        self.grid_embedding_neurons = getattr(fitting, 'grid_embedding_neurons', [])
+        if self.grid_embedding_neurons:
+            input_dim = 1 + self.descriptor.repinit_args.tebd_dim
+            output_dim = self.descriptor.get_dim_out()
+            dims = [input_dim] + self.grid_embedding_neurons + [output_dim]
+            self.grid_embedding_layers = nn.ModuleList([
+                MLPLayer(
+                    dims[i],
+                    dims[i+1],
+                    precision=env.DEFAULT_PRECISION,
+                    activation_function="tanh",
+                ) for i in range(len(dims)-1)
+            ])
+        else:
+            self.grid_embedding_layers = None
 
         wanted_shape = (1, self.nnei, 4)
         mean = torch.zeros(
@@ -70,6 +77,15 @@ class DPDensityAtomicModel(DPAtomicModel):
         )
         self.register_buffer("mean", mean)
         self.register_buffer("stddev", stddev)
+
+    def _apply_grid_embedding(self, h2_and_type: torch.Tensor) -> torch.Tensor:
+        """Apply grid embedding if layers are present, otherwise return input directly."""
+        if self.grid_embedding_layers is not None:
+            gg = h2_and_type
+            for layer in self.grid_embedding_layers:
+                gg = layer(gg)
+            return gg
+        return h2_and_type
 
     def forward_atomic(
         self,
@@ -85,27 +101,34 @@ class DPDensityAtomicModel(DPAtomicModel):
         grid_nlist: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """Return atomic prediction.
-
+        
         Parameters
         ----------
-        extended_coord
-            coodinates in extended region
-        extended_atype
-            atomic type in extended region
-        nlist
-            neighbor list. nf x nloc x nsel
-        mapping
-            mapps the extended indices to local indices
-        fparam
-            frame parameter. nf x ndf
-        aparam
-            atomic parameter. nf x nloc x nda
+        extended_coord : torch.Tensor
+            Extended coordinates
+        extended_atype : torch.Tensor
+            Extended atom types
+        nlist : torch.Tensor
+            Neighbor list
+        mapping : Optional[torch.Tensor], optional
+            Maps the extended indices to local indices, by default None
+        fparam : Optional[torch.Tensor], optional
+            Frame parameter, by default None
+        aparam : Optional[torch.Tensor], optional
+            Atomic parameter, by default None
+        comm_dict : Optional[Dict[str, torch.Tensor]], optional
+            Communication dictionary, by default None
+        grid : Optional[torch.Tensor], optional
+            Grid points, by default None
+        grid_type : Optional[torch.Tensor], optional
+            Grid point types, by default None
+        grid_nlist : Optional[torch.Tensor], optional
+            Grid neighbor list, by default None
 
         Returns
         -------
-        result_dict
-            the result dict, defined by the `FittingOutputDef`.
-
+        Dict[str, torch.Tensor]
+            Dictionary containing the density predictions
         """
         nframes, nloc, nnei = nlist.shape
         atype = extended_atype[:, :nloc]
@@ -162,9 +185,8 @@ class DPDensityAtomicModel(DPAtomicModel):
         # nb x ngrid x nnei x (1+ntebd)
         h2_and_type = torch.concat([h2[:, :, :, :1], grid_tebd], -1)
         # nb x ngrid x nnei x ng1
-        gg = h2_and_type
-        for layer in self.grid_embedding_layers:
-            gg = layer(gg)
+        gg = self._apply_grid_embedding(h2_and_type)
+
         # electron-to-atom equivariant feature: nb x ngrid x nnei x 4 x ng1
         e2aef = h2.unsqueeze(-1) * gg.unsqueeze(-2)
 
