@@ -59,14 +59,15 @@ class DPDensityAtomicModel(DPAtomicModel):
             dims = [input_dim] + self.grid_embedding_neurons + [output_dim]
             self.grid_embedding_layers = nn.ModuleList([
                 MLPLayer(
-                    dims[i],
-                    dims[i+1],
-                    precision=env.DEFAULT_PRECISION,
-                    activation_function="tanh",
+                dims[i],
+                dims[i+1],
+                precision=env.DEFAULT_PRECISION,
+                activation_function="tanh",
                 ) for i in range(len(dims)-1)
             ])
         else:
             self.grid_embedding_layers = None
+        
 
         wanted_shape = (1, self.nnei, 4)
         mean = torch.zeros(
@@ -86,7 +87,7 @@ class DPDensityAtomicModel(DPAtomicModel):
                 gg = layer(gg)
             return gg
         return h2_and_type
-
+    
     def forward_atomic(
         self,
         extended_coord,
@@ -186,6 +187,15 @@ class DPDensityAtomicModel(DPAtomicModel):
         h2_and_type = torch.concat([h2[:, :, :, :1], grid_tebd], -1)
         # nb x ngrid x nnei x ng1
         gg = self._apply_grid_embedding(h2_and_type)
+        if self.grid_embedding_layers is None:
+            # Add a linear projection to match dimensions if needed
+            weight = torch.ones(
+                self.descriptor.get_dim_out(), 
+                gg.shape[-1], 
+                device=gg.device,
+                dtype=gg.dtype  # Match the input tensor dtype
+            )
+            gg = torch.nn.functional.linear(gg, weight, bias=None)
 
         # electron-to-atom equivariant feature: nb x ngrid x nnei x 4 x ng1
         e2aef = h2.unsqueeze(-1) * gg.unsqueeze(-2)
