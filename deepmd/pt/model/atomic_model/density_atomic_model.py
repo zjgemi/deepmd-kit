@@ -9,6 +9,7 @@ from typing import (
 )
 
 import torch
+import torch.nn as nn
 
 from deepmd.pt.model.descriptor.env_mat import (
     prod_env_mat,
@@ -51,12 +52,12 @@ class DPDensityAtomicModel(DPAtomicModel):
         self.axis_neuron = self.descriptor.axis_neuron
         neurons = []
         dims = [1 + self.descriptor.repinit_args.tebd_dim] + neurons + [self.descriptor.get_dim_out()]
-        self.grid_embedding_layers = [MLPLayer(
+        self.grid_embedding_layers = nn.ModuleList([MLPLayer(
             dims[i],
             dims[i+1],
             precision=env.DEFAULT_PRECISION,
             activation_function="tanh",
-        ) for i in range(len(neurons)+1)]
+        ) for i in range(len(neurons)+1)])
 
         wanted_shape = (1, self.nnei, 4)
         mean = torch.zeros(
