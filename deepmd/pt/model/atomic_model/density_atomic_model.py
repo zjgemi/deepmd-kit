@@ -19,6 +19,7 @@ from deepmd.pt.model.descriptor.repformer_layer import (
 )
 from deepmd.pt.model.network.mlp import (
     MLPLayer,
+    FittingNet,
 )
 from deepmd.pt.model.task.density import (
     DensityFittingNet,
@@ -57,6 +58,15 @@ class DPDensityAtomicModel(DPAtomicModel):
             precision=env.DEFAULT_PRECISION,
             activation_function="tanh",
         ) for i in range(len(neurons)+1)])
+
+        atomic_density_neurons = [240, 240, 240]
+        self.atomic_density_network = FittingNet(
+            1 + self.descriptor.repinit_args.tebd_dim,
+            1,
+            atomic_density_neurons,
+            activation_function="tanh",
+            resnet_dt=True,
+        )
 
         wanted_shape = (1, self.nnei, 4)
         mean = torch.zeros(
@@ -165,6 +175,8 @@ class DPDensityAtomicModel(DPAtomicModel):
         # electron-to-atom equivariant feature: nb x ngrid x nnei x 4 x ng1
         e2aef = h2.unsqueeze(-1) * gg.unsqueeze(-2)
 
+        atomic_density = self.atomic_density_network(h2_and_type)
+
         dmatrix, diff, sw = prod_env_mat(
             extended_coord,
             nlist,
@@ -214,7 +226,7 @@ class DPDensityAtomicModel(DPAtomicModel):
             aparam=aparam,
         )
         # nb x ngrid x nnei x 1
-        nei_density = torch.exp(fit_ret["density"].view(nframes, ngrid, nnei, 1))
+        nei_density = torch.exp(atomic_density) + 2e-3*fit_ret["density"].view(nframes, ngrid, nnei, 1)
         nei_density = torch.where(grid_nlist_mask.unsqueeze(-1), nei_density, 0)
         # nb x ngrid x 1
         grid_density = torch.sum(nei_density, -2)
