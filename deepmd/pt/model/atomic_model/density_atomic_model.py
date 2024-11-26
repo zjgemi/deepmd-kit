@@ -19,6 +19,10 @@ from deepmd.pt.model.descriptor.repformer_layer import (
 )
 from deepmd.pt.model.network.mlp import (
     MLPLayer,
+    FittingNet,
+)
+from deepmd.pt.model.network.network import (
+    TypeEmbedNet,
 )
 from deepmd.pt.model.task.density import (
     DensityFittingNet,
@@ -57,6 +61,23 @@ class DPDensityAtomicModel(DPAtomicModel):
             precision=env.DEFAULT_PRECISION,
             activation_function="tanh",
         ) for i in range(len(neurons)+1)])
+
+        self.type_embedding = TypeEmbedNet(
+            self.descriptor.ntypes - 1,
+            self.descriptor.repinit_args.tebd_dim,
+            precision=env.DEFAULT_PRECISION,
+            use_econf_tebd=self.descriptor.use_econf_tebd,
+            use_tebd_bias=self.descriptor.use_tebd_bias,
+            type_map=self.descriptor.type_map,
+        )
+        atomic_density_neurons = [240, 240, 240]
+        self.atomic_density_network = FittingNet(
+            1 + self.descriptor.repinit_args.tebd_dim,
+            1,
+            atomic_density_neurons,
+            activation_function="tanh",
+            resnet_dt=True,
+        )
 
         wanted_shape = (1, self.nnei, 4)
         mean = torch.zeros(
@@ -108,24 +129,43 @@ class DPDensityAtomicModel(DPAtomicModel):
         atype = extended_atype[:, :nloc]
         if self.do_grad_r() or self.do_grad_c():
             extended_coord.requires_grad_(True)
-        descriptor, rot_mat, g2, h2, sw = self.descriptor(
-            extended_coord,
-            extended_atype,
-            nlist,
-            mapping=mapping,
-            comm_dict=comm_dict,
-        )
-        assert descriptor is not None
+        assert mapping is not None
         assert grid is not None
         assert grid_type is not None
         assert grid_nlist is not None
         bsz, ngrid, nnei = grid_nlist.shape
-        grid_nlist_mask = grid_nlist >= 0
+        # nb x (ngrid+nall) x 3
         merged_coord = torch.cat([grid, extended_coord], dim=1)
-        shifted_nlist = torch.where(grid_nlist_mask, grid_nlist + ngrid, -1)
+
+        grid_atype = torch.ones([nframes, ngrid], device=extended_atype.device, dtype=extended_atype.dtype)*(self.descriptor.ntypes - 1)
+        # nb x (ngrid+nall)
+        merged_atype = torch.cat([grid_atype, extended_atype], dim=1)
+
+        # nb x ngrid
+        grid_nlist_mask = grid_nlist >= 0
+        shifted_grid_nlist = torch.where(grid_nlist_mask, grid_nlist + ngrid, -1)
+        # nb x all
+        nlist_mask = nlist >= 0
+        shifted_nlist = torch.where(nlist_mask, nlist + ngrid, -1)
+        # nb x (ngrid+nall)
+        merged_nlist = torch.cat([shifted_grid_nlist, shifted_nlist], dim=1)
+
+        grid_mapping = torch.cat([torch.ones([nframes, 1], device=mapping.device, dtype=mapping.dtype)* i for i in range(ngrid)], dim=1)
+        # nb x (ngrid+nall)
+        merged_mapping = torch.cat([grid_mapping, mapping + ngrid], dim=1)
+
+        descriptor, rot_mat, g2, h2, sw = self.descriptor(
+            merged_coord,
+            merged_atype,
+            merged_nlist,
+            mapping=merged_mapping,
+            comm_dict=comm_dict,
+        )
+        assert descriptor is not None
+
         dmatrix, diff, sw = prod_env_mat(
             merged_coord,
-            shifted_nlist,
+            shifted_grid_nlist,
             grid_type,
             self.mean,
             self.stddev,
@@ -133,23 +173,10 @@ class DPDensityAtomicModel(DPAtomicModel):
             self.rcut_smth,
             protection=self.env_protection,
         )
-        # 1. nb x ngrid x nnei x 3
-        h2 = diff / self.rcut
-        # 2. nb x ngrid x nnei x 4
+        # nb x ngrid x nnei x 4
         h2 = dmatrix
-        nall = extended_coord.view(nframes, -1).shape[1] // 3
-        assert mapping is not None  # need fix for comm_dict
-        mapping_ng1 = (
-            mapping.view(nframes, nall)
-            .unsqueeze(-1)
-            .expand(-1, -1, self.descriptor.get_dim_out())
-        )
-        # nb x nall x ng1
-        g1_ext = torch.gather(descriptor, 1, mapping_ng1)
-
-        ng1 = self.descriptor.get_dim_out()
         # nb x nall x ntebd
-        tebd = self.descriptor.type_embedding(extended_atype)
+        tebd = self.type_embedding(extended_atype)
         ntebd = tebd.shape[-1]
         grid_nlist_0 = torch.where(grid_nlist_mask, grid_nlist, 0)
         grid_nlist_expanded = grid_nlist_0.view(nframes, ngrid*nnei).unsqueeze(-1).expand(-1, -1, ntebd)
@@ -158,55 +185,13 @@ class DPDensityAtomicModel(DPAtomicModel):
         grid_tebd = torch.where(grid_nlist_mask.unsqueeze(-1), grid_tebd, 0)
         # nb x ngrid x nnei x (1+ntebd)
         h2_and_type = torch.concat([h2[:, :, :, :1], grid_tebd], -1)
-        # nb x ngrid x nnei x ng1
-        gg = h2_and_type
-        for layer in self.grid_embedding_layers:
-            gg = layer(gg)
-        # electron-to-atom equivariant feature: nb x ngrid x nnei x 4 x ng1
-        e2aef = h2.unsqueeze(-1) * gg.unsqueeze(-2)
 
-        dmatrix, diff, sw = prod_env_mat(
-            extended_coord,
-            nlist,
-            atype,
-            self.descriptor.repinit.mean,
-            self.descriptor.repinit.stddev,
-            self.rcut,
-            self.rcut_smth,
-            protection=self.env_protection,
-        )
-        # nb x nloc x nnei x 4
-        h2 = dmatrix
-        nlist_mask = nlist >= 0
-        nlist_0 = torch.where(nlist_mask, nlist, 0)
-        # nb x nloc x nnei x ng1
-        gg1 = _make_nei_g1(g1_ext, nlist_0)
-        # nb x nloc x 4 x ng1
-        h2g1 = RepformerLayer._cal_hg(
-            gg1, h2, nlist_mask, sw.squeeze(-1), smooth=True, epsilon=1e-4
-        )
-
-        grid_nlist_0 = torch.where(grid_nlist_mask, grid_nlist, 0)
-        # nb x (ngrid*nnei)
-        grid_nlist_loc = torch.gather(mapping, 1, grid_nlist_0.view(nframes, ngrid*nnei))
-        # nb x (ngrid*nnei) x 4 x ng1
-        grid_nlist_expanded = grid_nlist_loc.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 4, ng1)
-        # atomic equivariant feature: nb x ngrid x nnei x 4 x ng1
-        aef = torch.gather(h2g1, 1, grid_nlist_expanded).view(nframes, ngrid, nnei, 4, ng1)
-        aef = torch.where(grid_nlist_mask.unsqueeze(-1).unsqueeze(-1), aef, 0)
-        # electron-to-atom invariant feature: nb x ngrid x nnei x ng1
-        e2aif = torch.sum(e2aef*aef, -2)
-
-        # atomic invariant feature: nb x ngrid x nnei x ng1
-        grid_nlist_expanded = grid_nlist_loc.unsqueeze(-1).expand(-1, -1, ng1)
-        aif = torch.gather(descriptor, 1, grid_nlist_expanded).view(nframes, ngrid, nnei, ng1)
-        aif = torch.where(grid_nlist_mask.unsqueeze(-1), aif, 0)
-        # electron-and-atom invariant feature: nb x ngrid x nnei x (ng1*2)
-        new_descriptor = torch.concat([aif, e2aif], 3)
+        # nb x ngrid x nnei x 1
+        atomic_density = self.atomic_density_network(h2_and_type)
 
         fit_ret = self.fitting_net(
-            new_descriptor.view(nframes, ngrid*nnei, ng1*2),
-            torch.zeros([nframes, ngrid*nnei], device=grid_type.device, dtype=grid_type.dtype),
+            descriptor[:, :ngrid, :],
+            torch.zeros([nframes, ngrid], device=grid_type.device, dtype=grid_type.dtype),
             gr=rot_mat,
             g2=g2,
             h2=h2,
@@ -214,10 +199,10 @@ class DPDensityAtomicModel(DPAtomicModel):
             aparam=aparam,
         )
         # nb x ngrid x nnei x 1
-        nei_density = torch.exp(fit_ret["density"].view(nframes, ngrid, nnei, 1))
+        nei_density = torch.exp(atomic_density)
         nei_density = torch.where(grid_nlist_mask.unsqueeze(-1), nei_density, 0)
         # nb x ngrid x 1
-        grid_density = torch.sum(nei_density, -2)
+        grid_density = torch.sum(nei_density, -2) + 2e-3 * fit_ret["density"]
         ret = {
             "density": grid_density,
         }
