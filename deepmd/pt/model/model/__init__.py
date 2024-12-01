@@ -155,9 +155,6 @@ def get_standard_model(model_params):
     model_params_old = model_params
     model_params = copy.deepcopy(model_params)
     ntypes = len(model_params["type_map"])
-    fitting_net = model_params.get("fitting_net", {})
-    if fitting_net["type"] == "density":
-        ntypes += 1
     # descriptor
     model_params["descriptor"]["ntypes"] = ntypes
     model_params["descriptor"]["type_map"] = copy.deepcopy(model_params["type_map"])
@@ -172,7 +169,7 @@ def get_standard_model(model_params):
         fitting_net["embedding_width"] = descriptor.get_dim_emb()
     fitting_net["dim_descrpt"] = descriptor.get_dim_out()
     if fitting_net["type"] == "density":
-        fitting_net["dim_descrpt"] = fitting_net["dim_descrpt"]
+        fitting_net["dim_descrpt"] = fitting_net["dim_descrpt"] * 2
     grad_force = "direct" not in fitting_net["type"]
     if not grad_force:
         fitting_net["out_dim"] = descriptor.get_dim_emb()
