@@ -154,10 +154,8 @@ def get_zbl_model(model_params):
 def get_standard_model(model_params):
     model_params_old = model_params
     model_params = copy.deepcopy(model_params)
-    ntypes = len(model_params["type_map"])
+    ntypes = len(model_params["type_map"]) + 1
     fitting_net = model_params.get("fitting_net", {})
-    if fitting_net["type"] == "density":
-        ntypes += 1
     # descriptor
     model_params["descriptor"]["ntypes"] = ntypes
     model_params["descriptor"]["type_map"] = copy.deepcopy(model_params["type_map"])
