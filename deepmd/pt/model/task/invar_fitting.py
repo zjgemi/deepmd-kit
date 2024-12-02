@@ -34,7 +34,6 @@ log = logging.getLogger(__name__)
 
 
 @GeneralFitting.register("invar")
-@fitting_check_output
 class InvarFitting(GeneralFitting):
     """Construct a fitting net for energy.
 
