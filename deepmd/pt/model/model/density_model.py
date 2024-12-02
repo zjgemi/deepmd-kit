@@ -43,6 +43,7 @@ class GridDensityModel(DPModelCommon, DPDensityModel_):
         output_def = {
             "density": deepcopy(out_def_data["density"]),
         }
+        output_def["density_grad"] = deepcopy(out_def_data["density_grad"])
         if "mask" in out_def_data:
             output_def["mask"] = deepcopy(out_def_data["mask"])
         return output_def
@@ -73,6 +74,7 @@ class GridDensityModel(DPModelCommon, DPDensityModel_):
         )
         model_predict = {}
         model_predict["density"] = model_ret["density"]
+        model_predict["density_grad"] = model_ret["density_grad"]
         if "mask" in model_ret:
             model_predict["mask"] = model_ret["mask"]
         return model_predict

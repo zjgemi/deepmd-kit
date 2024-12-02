@@ -642,7 +642,7 @@ class DeepmdData:
         #         data.append(densities)
         #     data = np.stack(data)  # [nframes, ngrids]
         #     return np.float32(1.0), data
-        if key in ["grid", "density"] and path.is_file():
+        if key in ["grid", "density", "density_grad"] and path.is_file():
             data = path.load_numpy().astype(dtype)
             return np.float32(1.0), data
         elif path.is_file():

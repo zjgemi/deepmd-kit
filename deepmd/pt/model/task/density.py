@@ -82,6 +82,13 @@ class DensityFittingNet(InvarFitting):
                     r_differentiable=False,
                     c_differentiable=False,
                 ),
+                OutputVariableDef(
+                    "density_grad",
+                    [3],
+                    reducible=False,
+                    r_differentiable=False,
+                    c_differentiable=False,
+                ),
             ]
         )
 

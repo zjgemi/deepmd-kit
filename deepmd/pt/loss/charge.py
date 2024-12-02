@@ -25,6 +25,8 @@ class GridDensityLoss(TaskLoss):
         starter_learning_rate=1.0,
         start_pref_d=0.0,
         limit_pref_d=0.0,
+        start_pref_g=0.0,
+        limit_pref_g=0.0,
         inference=False,
         **kwargs,
     ):
@@ -46,9 +48,12 @@ class GridDensityLoss(TaskLoss):
         super().__init__()
         self.starter_learning_rate = starter_learning_rate
         self.has_d = (start_pref_d != 0.0 and limit_pref_d != 0.0) or inference
+        self.has_g = (start_pref_g != 0.0 and limit_pref_g != 0.0) or inference
 
         self.start_pref_d = start_pref_d
         self.limit_pref_d = limit_pref_d
+        self.start_pref_g = start_pref_g
+        self.limit_pref_g = limit_pref_g
         self.inference = inference
 
     def forward(self, input_dict, model, label, natoms, learning_rate, mae=False):
@@ -77,6 +82,7 @@ class GridDensityLoss(TaskLoss):
         model_pred = model(**input_dict)
         coef = learning_rate / self.starter_learning_rate
         pref_d = self.limit_pref_d + (self.start_pref_d - self.limit_pref_d) * coef
+        pref_g = self.limit_pref_g + (self.start_pref_g - self.limit_pref_g) * coef
 
         loss = torch.zeros(1, dtype=env.GLOBAL_PT_FLOAT_PRECISION, device=env.DEVICE)[0]
         more_loss = {}
@@ -100,6 +106,21 @@ class GridDensityLoss(TaskLoss):
             loss += (pref_d * l2_density_loss).to(GLOBAL_PT_FLOAT_PRECISION)
             rmse_d = l2_density_loss.sqrt()
             more_loss["rmse_d"] = self.display_if_exist(rmse_d.detach(), find_density)
+        if self.has_g and "density_grad" in model_pred and "density_grad" in label:
+            density_grad_pred = model_pred["density_grad"]
+            density_grad_label = label["density_grad"]
+            find_density_grad = label.get("find_density_grad", 0.0)
+            pref_g = pref_g * find_density_grad
+            l2_density_grad_loss = torch.square(
+                density_grad_label.reshape(-1) - density_grad_pred.reshape(-1)
+            ).mean()
+            if not self.inference:
+                more_loss["l2_density_grad_loss"] = self.display_if_exist(
+                    l2_density_grad_loss.detach(), find_density_grad
+                )
+            loss += (pref_g * l2_density_grad_loss).to(GLOBAL_PT_FLOAT_PRECISION)
+            rmse_g = l2_density_grad_loss.sqrt()
+            more_loss["rmse_g"] = self.display_if_exist(rmse_g.detach(), find_density_grad)
         return model_pred, loss, more_loss
 
     @property
@@ -120,6 +141,16 @@ class GridDensityLoss(TaskLoss):
                 DataRequirementItem(
                     "density",
                     ndof=1,
+                    atomic=True,
+                    must=False,
+                    high_prec=True,
+                )
+            )
+        if self.has_g:
+            label_requirement.append(
+                DataRequirementItem(
+                    "density_grad",
+                    ndof=3,
                     atomic=True,
                     must=False,
                     high_prec=True,

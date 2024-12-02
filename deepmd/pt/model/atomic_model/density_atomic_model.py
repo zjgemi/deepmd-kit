@@ -119,6 +119,7 @@ class DPDensityAtomicModel(DPAtomicModel):
         if self.do_grad_r() or self.do_grad_c():
             extended_coord.requires_grad_(True)
         assert grid is not None
+        grid.requires_grad_(True)
         assert grid_type is not None
         assert grid_nlist is not None
         bsz, ngrid, nnei = grid_nlist.shape
@@ -158,8 +159,17 @@ class DPDensityAtomicModel(DPAtomicModel):
         nei_density = torch.where(grid_nlist_mask.unsqueeze(-1), nei_density, 0)
         # nb x ngrid x 1
         grid_density = torch.sum(nei_density, -2)
+        # nb x ngrid x 3
+        density_grad = torch.autograd.grad(
+            [grid_density],
+            [grid],
+            grad_outputs=torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones_like(grid_density)]),
+            retain_graph=True,
+        )[0]
+        assert density_grad is not None
         ret = {
             "density": grid_density,
+            "density_grad": density_grad,
         }
         return ret
 

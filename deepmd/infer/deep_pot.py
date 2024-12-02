@@ -208,8 +208,7 @@ class DeepPot(DeepEval):
             **kwargs,
         )
         if "grid" in kwargs:
-            result = results["density"].reshape(nframes, -1)
-            return result
+            return results["density"].reshape(nframes, -1), results["density_grad"].reshape(nframes, -1, 3)
         energy = results["energy_redu"].reshape(nframes, 1)
         force = results["energy_derv_r"].reshape(nframes, natoms, 3)
         virial = results["energy_derv_c_redu"].reshape(nframes, 9)

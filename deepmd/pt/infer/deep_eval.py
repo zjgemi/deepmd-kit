@@ -289,7 +289,7 @@ class DeepEval(DeepEvalBackend):
                 aparam,
                 request_defs,
             )
-            return {"density": out}
+            return {"density": out[0], "density_grad": out[1]}
         return dict(
             zip(
                 [x.name for x in request_defs],
@@ -597,6 +597,10 @@ class DeepEval(DeepEvalBackend):
         pt_name = "density"
         density_shape = [nframes, ngrid]
         out = batch_output[pt_name].reshape(density_shape).detach().cpu().numpy()
+        results.append(out)
+        pt_name = "density_grad"
+        density_grad_shape = [nframes, ngrid, 3]
+        out = batch_output[pt_name].reshape(density_grad_shape).detach().cpu().numpy()
         results.append(out)
         # for odef in request_defs:
         #     pt_name = self._OUTDEF_DP2BACKEND[odef.name]

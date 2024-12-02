@@ -2212,6 +2212,8 @@ def loss_ener():
 def loss_grid_density():
     doc_start_pref_d = start_pref("density", abbr="d")
     doc_limit_pref_d = limit_pref("density")
+    doc_start_pref_g = start_pref("density grad", abbr="g")
+    doc_limit_pref_g = limit_pref("density grad")
     return [
         Argument(
             "start_pref_d",
@@ -2226,6 +2228,20 @@ def loss_grid_density():
             optional=True,
             default=1.00,
             doc=doc_limit_pref_d,
+        ),
+        Argument(
+            "start_pref_g",
+            [float, int],
+            optional=True,
+            default=1.00,
+            doc=doc_start_pref_g,
+        ),
+        Argument(
+            "limit_pref_g",
+            [float, int],
+            optional=True,
+            default=1.00,
+            doc=doc_limit_pref_g,
         ),
     ]
 
