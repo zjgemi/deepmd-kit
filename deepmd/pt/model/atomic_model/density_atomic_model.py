@@ -164,6 +164,7 @@ class DPDensityAtomicModel(DPAtomicModel):
             [grid_density],
             [grid],
             grad_outputs=torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones_like(grid_density)]),
+            create_graph=True,
             retain_graph=True,
         )[0]
         assert density_grad is not None
