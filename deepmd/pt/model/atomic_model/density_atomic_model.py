@@ -212,7 +212,7 @@ class DPDensityAtomicModel(DPAtomicModel):
         assert grid is not None
         assert grid_type is not None
         assert grid_nlist is not None
-        _, nloc, _ = nlist.shape
+        nframes, nloc, _ = nlist.shape
         _, ngrid, _ = grid_nlist.shape
         atype = extended_atype[:, :nloc]
 
@@ -239,7 +239,7 @@ class DPDensityAtomicModel(DPAtomicModel):
         ext_grid_mask = self.make_atom_mask(grid_type)
 
         # nf x ngrid
-        grid_mask = ext_atom_mask[:, :ngrid].to(torch.int32)
+        grid_mask = torch.ones([nframes, ngrid], dtype=torch.int32, device=ext_atom_mask.device)
         if self.atom_excl is not None:
             grid_mask *= self.atom_excl(grid_type)
 
