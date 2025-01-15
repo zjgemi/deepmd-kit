@@ -1,17 +1,15 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 import logging
 import os
-import queue
 import time
 from multiprocessing.dummy import (
     Pool,
 )
+from queue import (
+    Queue,
+)
 from threading import (
     Thread,
-)
-from typing import (
-    List,
-    Tuple,
 )
 
 import h5py
@@ -32,6 +30,7 @@ from torch.utils.data.distributed import (
 )
 
 from deepmd.pt.utils import (
+    dp_random,
     env,
 )
 from deepmd.pt.utils.dataset import (
@@ -50,10 +49,11 @@ log = logging.getLogger(__name__)
 torch.multiprocessing.set_sharing_strategy("file_system")
 
 
-def setup_seed(seed):
+def setup_seed(seed) -> None:
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
+    dp_random.seed(seed)
 
 
 class DpLoaderSet(Dataset):
@@ -80,16 +80,14 @@ class DpLoaderSet(Dataset):
         type_map,
         seed=None,
         shuffle=True,
-        density_grid_size: Tuple[int, int, int] = (5, 5, 5),
-        density_origin: np.ndarray = np.zeros(3, dtype=np.float32),
-    ):
+    ) -> None:
         if seed is not None:
             setup_seed(seed)
         if isinstance(systems, str):
             with h5py.File(systems) as file:
                 systems = [os.path.join(systems, item) for item in file.keys()]
 
-        self.systems: List[DeepmdDataSetForLoader] = []
+        self.systems: list[DeepmdDataSetForLoader] = []
         if len(systems) >= 100:
             log.info(f"Constructing DataLoaders from {len(systems)} systems")
 
@@ -97,8 +95,6 @@ class DpLoaderSet(Dataset):
             return DeepmdDataSetForLoader(
                 system=system,
                 type_map=type_map,
-                density_grid_size=density_grid_size,
-                density_origin=density_origin,
             )
 
         with Pool(
@@ -111,7 +107,7 @@ class DpLoaderSet(Dataset):
         ) as pool:
             self.systems = pool.map(construct_dataset, systems)
 
-        self.sampler_list: List[DistributedSampler] = []
+        self.sampler_list: list[DistributedSampler] = []
         self.index = []
         self.total_batch = 0
 
@@ -160,7 +156,7 @@ class DpLoaderSet(Dataset):
             for item in self.dataloaders:
                 self.iters.append(iter(item))
 
-    def set_noise(self, noise_settings):
+    def set_noise(self, noise_settings) -> None:
         # noise_settings['noise_type'] # "trunc_normal", "normal", "uniform"
         # noise_settings['noise'] # float, default 1.0
         # noise_settings['noise_mode'] # "prob", "fix_num"
@@ -170,7 +166,7 @@ class DpLoaderSet(Dataset):
         for system in self.systems:
             system.set_noise(noise_settings)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.dataloaders)
 
     def __getitem__(self, idx):
@@ -183,7 +179,7 @@ class DpLoaderSet(Dataset):
         batch["sid"] = idx
         return batch
 
-    def add_data_requirement(self, data_requirement: List[DataRequirementItem]):
+    def add_data_requirement(self, data_requirement: list[DataRequirementItem]) -> None:
         """Add data requirement for each system in multiple systems."""
         for system in self.systems:
             system.add_data_requirement(data_requirement)
@@ -191,87 +187,70 @@ class DpLoaderSet(Dataset):
     def print_summary(
         self,
         name: str,
-        prob: List[float],
-    ):
-        print_summary(
-            name,
-            len(self.systems),
-            [ss.system for ss in self.systems],
-            [ss._natoms for ss in self.systems],
-            self.batch_sizes,
-            [
-                ss._data_system.get_sys_numb_batch(self.batch_sizes[ii])
-                for ii, ss in enumerate(self.systems)
-            ],
-            prob,
-            [ss._data_system.pbc for ss in self.systems],
-        )
-
-
-_sentinel = object()
-QUEUESIZE = 32
+        prob: list[float],
+    ) -> None:
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        if rank == 0:
+            print_summary(
+                name,
+                len(self.systems),
+                [ss.system for ss in self.systems],
+                [ss._natoms for ss in self.systems],
+                self.batch_sizes,
+                [
+                    ss._data_system.get_sys_numb_batch(self.batch_sizes[ii])
+                    for ii, ss in enumerate(self.systems)
+                ],
+                prob,
+                [ss._data_system.pbc for ss in self.systems],
+            )
 
 
 class BackgroundConsumer(Thread):
-    def __init__(self, queue, source, max_len):
-        Thread.__init__(self)
+    def __init__(self, queue, source) -> None:
+        super().__init__()
+        self.daemon = True
         self._queue = queue
         self._source = source  # Main DL iterator
-        self._max_len = max_len  #
 
-    def run(self):
+    def run(self) -> None:
         for item in self._source:
             self._queue.put(item)  # Blocking if the queue is full
 
-        # Signal the consumer we are done.
-        self._queue.put(_sentinel)
+        # Signal the consumer we are done; this should not happen for DataLoader
+        self._queue.put(StopIteration())
+
+
+QUEUESIZE = 32
 
 
 class BufferedIterator:
-    def __init__(self, iterable):
-        self._queue = queue.Queue(QUEUESIZE)
+    def __init__(self, iterable) -> None:
+        self._queue = Queue(QUEUESIZE)
         self._iterable = iterable
-        self._consumer = None
-
-        self.start_time = time.time()
-        self.warning_time = None
-        self.total = len(iterable)
-
-    def _create_consumer(self):
-        self._consumer = BackgroundConsumer(self._queue, self._iterable, self.total)
-        self._consumer.daemon = True
+        self._consumer = BackgroundConsumer(self._queue, self._iterable)
         self._consumer.start()
+        self.last_warning_time = time.time()
 
     def __iter__(self):
         return self
 
-    def __len__(self):
-        return self.total
+    def __len__(self) -> int:
+        return len(self._iterable)
 
     def __next__(self):
-        # Create consumer if not created yet
-        if self._consumer is None:
-            self._create_consumer()
-        # Notify the user if there is a data loading bottleneck
-        if self._queue.qsize() < min(2, max(1, self._queue.maxsize // 2)):
-            if time.time() - self.start_time > 5 * 60:
-                if (
-                    self.warning_time is None
-                    or time.time() - self.warning_time > 15 * 60
-                ):
-                    log.warning(
-                        "Data loading buffer is empty or nearly empty. This may "
-                        "indicate a data loading bottleneck, and increasing the "
-                        "number of workers (--num-workers) may help."
-                    )
-                    self.warning_time = time.time()
-
-        # Get next example
+        start_wait = time.time()
         item = self._queue.get()
+        wait_time = time.time() - start_wait
+        if (
+            wait_time > 1.0 and start_wait - self.last_warning_time > 15 * 60
+        ):  # Even for Multi-Task training, each step usually takes < 1s
+            log.warning(
+                f"Data loading is slow, waited {wait_time:.2f} seconds. Ignoring this warning for 15 minutes."
+            )
+            self.last_warning_time = start_wait
         if isinstance(item, Exception):
             raise item
-        if item is _sentinel:
-            raise StopIteration
         return item
 
 
@@ -309,8 +288,24 @@ def get_weighted_sampler(training_data, prob_style, sys_prob=False):
     else:
         probs = process_sys_probs(prob_style, training_data.index)
     log.debug("Generated weighted sampler with prob array: " + str(probs))
-    # training_data.total_batch is the size of one epoch, you can increase it to avoid too many  rebuilding of iteraters
+    # training_data.total_batch is the size of one epoch, you can increase it to avoid too many  rebuilding of iterators
     len_sampler = training_data.total_batch * max(env.NUM_WORKERS, 1)
     with torch.device("cpu"):
         sampler = WeightedRandomSampler(probs, len_sampler, replacement=True)
     return sampler
+
+
+def get_sampler_from_params(_data, _params):
+    if (
+        "sys_probs" in _params and _params["sys_probs"] is not None
+    ):  # use sys_probs first
+        _sampler = get_weighted_sampler(
+            _data,
+            _params["sys_probs"],
+            sys_prob=True,
+        )
+    elif "auto_prob" in _params:
+        _sampler = get_weighted_sampler(_data, _params["auto_prob"])
+    else:
+        _sampler = get_weighted_sampler(_data, "prob_sys_size")
+    return _sampler

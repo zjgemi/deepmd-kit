@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 import logging
 from typing import (
-    Dict,
     Optional,
     Union,
 )
@@ -18,11 +17,11 @@ log = logging.getLogger(__name__)
 class ModelWrapper(torch.nn.Module):
     def __init__(
         self,
-        model: Union[torch.nn.Module, Dict],
-        loss: Union[torch.nn.Module, Dict] = None,
+        model: Union[torch.nn.Module, dict],
+        loss: Union[torch.nn.Module, dict] = None,
         model_params=None,
         shared_links=None,
-    ):
+    ) -> None:
         """Construct a DeePMD model wrapper.
 
         Args:
@@ -60,11 +59,11 @@ class ModelWrapper(torch.nn.Module):
                     self.loss[task_key] = loss[task_key]
         self.inference_only = self.loss is None
 
-    def share_params(self, shared_links, resume=False):
+    def share_params(self, shared_links, resume=False) -> None:
         """
         Share the parameters of classes following rules defined in shared_links during multitask training.
         If not start from checkpoint (resume is False),
-        some seperated parameters (e.g. mean and stddev) will be re-calculated across different classes.
+        some separated parameters (e.g. mean and stddev) will be re-calculated across different classes.
         """
         supported_types = ["descriptor", "fitting_net"]
         for shared_item in shared_links:
@@ -113,8 +112,10 @@ class ModelWrapper(torch.nn.Module):
                         f"Shared params of {model_key_base}.{class_type_base} and {model_key_link}.{class_type_link}!"
                     )
             else:
-                if hasattr(self.model[model_key_base], class_type_base):
-                    base_class = self.model[model_key_base].__getattr__(class_type_base)
+                if hasattr(self.model[model_key_base].atomic_model, class_type_base):
+                    base_class = self.model[model_key_base].atomic_model.__getattr__(
+                        class_type_base
+                    )
                     for link_item in shared_links[shared_item]["links"][1:]:
                         class_type_link = link_item["shared_type"]
                         model_key_link = link_item["model_key"]
@@ -125,9 +126,9 @@ class ModelWrapper(torch.nn.Module):
                         assert (
                             class_type_base == class_type_link
                         ), f"Class type mismatched: {class_type_base} vs {class_type_link}!"
-                        link_class = self.model[model_key_link].__getattr__(
-                            class_type_link
-                        )
+                        link_class = self.model[
+                            model_key_link
+                        ].atomic_model.__getattr__(class_type_link)
                         link_class.share_params(
                             base_class, shared_level_link, resume=resume
                         )
@@ -190,12 +191,12 @@ class ModelWrapper(torch.nn.Module):
             )
             return model_pred, loss, more_loss
 
-    def set_extra_state(self, state: Dict):
+    def set_extra_state(self, state: dict) -> None:
         self.model_params = state["model_params"]
         self.train_infos = state["train_infos"]
         return None
 
-    def get_extra_state(self) -> Dict:
+    def get_extra_state(self) -> dict:
         state = {
             "model_params": self.model_params,
             "train_infos": self.train_infos,

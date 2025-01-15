@@ -4,9 +4,7 @@
 import bisect
 import logging
 from typing import (
-    List,
     Optional,
-    Tuple,
 )
 
 import numpy as np
@@ -26,7 +24,7 @@ log = logging.getLogger(__name__)
 class DeepmdData:
     """Class for a data system.
 
-    It loads data from hard disk, and mantains the data as a `data_dict`
+    It loads data from hard disk, and maintains the data as a `data_dict`
 
     Parameters
     ----------
@@ -45,7 +43,7 @@ class DeepmdData:
     trn_all_set
             [DEPRECATED] Deprecated. Now all sets are trained and tested.
     sort_atoms : bool
-            Sort atoms by atom types. Required to enable when the data is directly feeded to
+            Sort atoms by atom types. Required to enable when the data is directly fed to
             descriptors except mixed types.
     """
 
@@ -54,16 +52,16 @@ class DeepmdData:
         sys_path: str,
         set_prefix: str = "set",
         shuffle_test: bool = True,
-        type_map: Optional[List[str]] = None,
+        type_map: Optional[list[str]] = None,
         optional_type_map: bool = True,
         modifier=None,
         trn_all_set: bool = False,
         sort_atoms: bool = True,
-        density_grid_size: Tuple[int, int, int] = (5, 5, 5),
-        density_origin: np.ndarray = np.zeros(3, dtype=np.float32),
-    ):
+    ) -> None:
         """Constructor."""
         root = DPPath(sys_path)
+        if not root.is_dir():
+            raise FileNotFoundError(f"System {sys_path} is not found!")
         self.dirs = root.glob(set_prefix + ".*")
         if not len(self.dirs):
             raise FileNotFoundError(f"No {set_prefix}.* is found in {sys_path}")
@@ -129,8 +127,6 @@ class DeepmdData:
         self.nframes = np.sum(frames_list)
         # The prefix sum stores the range of indices contained in each directory, which is needed by get_item method
         self.prefix_sum = np.cumsum(frames_list).tolist()
-        self.density_grid_size = tuple(density_grid_size)
-        self.density_origin = np.array(density_origin)
 
     def add(
         self,
@@ -139,7 +135,7 @@ class DeepmdData:
         atomic: bool = False,
         must: bool = False,
         high_prec: bool = False,
-        type_sel: Optional[List[int]] = None,
+        type_sel: Optional[list[int]] = None,
         repeat: int = 1,
         default: float = 0.0,
         dtype: Optional[np.dtype] = None,
@@ -202,7 +198,7 @@ class DeepmdData:
         assert key_out not in self.data_dict, "output key should not have been added"
         assert (
             self.data_dict[key_in]["repeat"] == 1
-        ), "reduced proerties should not have been repeated"
+        ), "reduced properties should not have been repeated"
 
         self.data_dict[key_out] = {
             "ndof": self.data_dict[key_in]["ndof"],
@@ -253,6 +249,21 @@ class DeepmdData:
         frame["fid"] = index
         return frame
 
+    def get_item_paddle(self, index: int) -> dict:
+        """Get a single frame data . The frame is picked from the data system by index. The index is coded across all the sets.
+
+        Parameters
+        ----------
+        index
+            index of the frame
+        """
+        i = bisect.bisect_right(self.prefix_sum, index)
+        frames = self._load_set(self.dirs[i])
+        frame = self._get_subdata(frames, index - self.prefix_sum[i])
+        frame = self.reformat_data_torch(frame)
+        frame["fid"] = index
+        return frame
+
     def get_batch(self, batch_size: int) -> dict:
         """Get a batch of data with `batch_size` frames. The frames are randomly picked from the data system.
 
@@ -272,7 +283,7 @@ class DeepmdData:
         iterator_1 = self.iterator + batch_size
         if iterator_1 >= set_size:
             iterator_1 = set_size
-        idx = np.arange(self.iterator, iterator_1)  # pylint: disable=no-explicit-dtype
+        idx = np.arange(self.iterator, iterator_1, dtype=np.int64)
         self.iterator += batch_size
         ret = self._get_subdata(self.batch_set, idx)
         return ret
@@ -296,7 +307,7 @@ class DeepmdData:
                 else self.test_set["type"].shape[0]
             )
             # print('ntest', self.test_set['type'].shape[0], ntests, ntests_)
-            idx = np.arange(ntests_)  # pylint: disable=no-explicit-dtype
+            idx = np.arange(ntests_, dtype=np.int64)
         ret = self._get_subdata(self.test_set, idx=idx)
         if self.modifier is not None:
             self.modifier.modify_data(ret, self)
@@ -309,11 +320,11 @@ class DeepmdData:
         else:
             return max(self.get_atom_type()) + 1
 
-    def get_type_map(self) -> List[str]:
+    def get_type_map(self) -> list[str]:
         """Get the type map."""
         return self.type_map
 
-    def get_atom_type(self) -> List[int]:
+    def get_atom_type(self) -> list[int]:
         """Get atom types."""
         return self.atom_type
 
@@ -384,14 +395,14 @@ class DeepmdData:
                 new_types.append(ii)
         new_types = np.array(new_types, dtype=int)
         natoms = new_types.shape[0]
-        idx = np.arange(natoms)  # pylint: disable=no-explicit-dtype
+        idx = np.arange(natoms, dtype=np.int64)
         idx_map = np.lexsort((idx, new_types))
         return idx_map
 
     def _get_natoms_2(self, ntypes):
         sample_type = self.atom_type
         natoms = len(sample_type)
-        natoms_vec = np.zeros(ntypes).astype(int)  # pylint: disable=no-explicit-dtype
+        natoms_vec = np.zeros(ntypes, dtype=np.int64)
         for ii in range(ntypes):
             natoms_vec[ii] = np.count_nonzero(sample_type == ii)
         return natoms, natoms_vec
@@ -409,7 +420,7 @@ class DeepmdData:
                     new_data[ii] = dd
         return new_data
 
-    def _load_batch_set(self, set_name: DPPath):
+    def _load_batch_set(self, set_name: DPPath) -> None:
         if not hasattr(self, "batch_set") or self.get_numb_set() > 1:
             self.batch_set = self._load_set(set_name)
             if self.modifier is not None:
@@ -417,10 +428,10 @@ class DeepmdData:
         self.batch_set, _ = self._shuffle_data(self.batch_set)
         self.reset_get_batch()
 
-    def reset_get_batch(self):
+    def reset_get_batch(self) -> None:
         self.iterator = 0
 
-    def _load_test_set(self, shuffle_test: bool):
+    def _load_test_set(self, shuffle_test: bool) -> None:
         test_sets = []
         for ii in self.dirs:
             test_set = self._load_set(ii)
@@ -441,7 +452,7 @@ class DeepmdData:
     def _shuffle_data(self, data):
         ret = {}
         nframes = data["coord"].shape[0]
-        idx = np.arange(nframes)  # pylint: disable=no-explicit-dtype
+        idx = np.arange(nframes, dtype=np.int64)
         # the training times of each frame
         idx = np.repeat(idx, np.reshape(data["numb_copy"], (nframes,)))
         dp_random.shuffle(idx)
@@ -612,36 +623,6 @@ class DeepmdData:
         else:
             dtype = GLOBAL_NP_FLOAT_PRECISION
         path = set_name / (key + ".npy")
-        # if key == "grid":
-        #     box_path = set_name / "box.npy"
-        #     boxes = box_path.load_numpy()
-        #     data = []
-        #     for box in boxes:
-        #         box = box.reshape(3, 3)
-        #         grid = generate_grid(
-        #             box, self.density_grid_size, self.density_origin
-        #         )  # [ngrids, 3]
-        #         data.append(grid)
-        #     data = np.stack(data)  # [nframes, ngrids, 3]
-        #     return np.float32(1.0), data
-        # elif key == "density" and path.is_file():
-        #     path_list = path.load_numpy()
-        #     box_path = set_name / "box.npy"
-        #     boxes = box_path.load_numpy()
-        #     data = []
-        #     for idx, path in enumerate(path_list):
-        #         filename = set_name / path[0]
-        #         densities = []
-        #         box = boxes[idx]
-        #         box = box.reshape(3, 3)
-        #         for _, batch_densities in calculate_density(
-        #             str(filename), box, self.density_grid_size, self.density_origin
-        #         ):
-        #             densities.append(batch_densities)
-        #         densities = np.concatenate(densities)  # [ngrids]
-        #         data.append(densities)
-        #     data = np.stack(data)  # [nframes, ngrids]
-        #     return np.float32(1.0), data
         if key in ["grid", "density"] and path.is_file():
             data = path.load_numpy().astype(dtype)
             return np.float32(1.0), data
@@ -715,7 +696,7 @@ class DeepmdData:
 
     def _make_idx_map(self, atom_type):
         natoms = atom_type.shape[0]
-        idx = np.arange(natoms)  # pylint: disable=no-explicit-dtype
+        idx = np.arange(natoms, dtype=np.int64)
         if self.sort_atoms:
             idx_map = np.lexsort((idx, atom_type))
         else:
@@ -776,7 +757,7 @@ class DataRequirementItem:
         atomic: bool = False,
         must: bool = False,
         high_prec: bool = False,
-        type_sel: Optional[List[int]] = None,
+        type_sel: Optional[list[int]] = None,
         repeat: int = 1,
         default: float = 0.0,
         dtype: Optional[np.dtype] = None,
@@ -813,10 +794,10 @@ class DataRequirementItem:
             raise KeyError(key)
         return self.dict[key]
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, DataRequirementItem):
+    def __eq__(self, value: object, /) -> bool:
+        if not isinstance(value, DataRequirementItem):
             return False
-        return self.dict == __value.dict
+        return self.dict == value.dict
 
     def __repr__(self) -> str:
         return f"DataRequirementItem({self.dict})"

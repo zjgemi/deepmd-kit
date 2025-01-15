@@ -2,12 +2,9 @@
 
 
 from typing import (
-    List,
     Optional,
-    Tuple,
 )
 
-import numpy as np
 from torch.utils.data import (
     Dataset,
 )
@@ -19,13 +16,7 @@ from deepmd.utils.data import (
 
 
 class DeepmdDataSetForLoader(Dataset):
-    def __init__(
-        self,
-        system: str,
-        type_map: Optional[List[str]] = None,
-        density_grid_size: Tuple[int, int, int] = (5, 5, 5),
-        density_origin: np.ndarray = np.zeros(3, dtype=np.float32),
-    ):
+    def __init__(self, system: str, type_map: Optional[list[str]] = None) -> None:
         """Construct DeePMD-style dataset containing frames cross different systems.
 
         Args:
@@ -34,18 +25,13 @@ class DeepmdDataSetForLoader(Dataset):
         """
         self.system = system
         self._type_map = type_map
-        self._data_system = DeepmdData(
-            sys_path=system,
-            type_map=self._type_map,
-            density_grid_size=density_grid_size,
-            density_origin=density_origin,
-        )
+        self._data_system = DeepmdData(sys_path=system, type_map=self._type_map)
         self.mixed_type = self._data_system.mixed_type
         self._ntypes = self._data_system.get_ntypes()
         self._natoms = self._data_system.get_natoms()
         self._natoms_vec = self._data_system.get_natoms_vec(self._ntypes)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self._data_system.nframes
 
     def __getitem__(self, index):
@@ -54,7 +40,7 @@ class DeepmdDataSetForLoader(Dataset):
         b_data["natoms"] = self._natoms_vec
         return b_data
 
-    def add_data_requirement(self, data_requirement: List[DataRequirementItem]):
+    def add_data_requirement(self, data_requirement: list[DataRequirementItem]) -> None:
         """Add data requirement for this data system."""
         for data_item in data_requirement:
             self._data_system.add(

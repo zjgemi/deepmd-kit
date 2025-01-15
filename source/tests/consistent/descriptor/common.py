@@ -3,8 +3,13 @@ from typing import (
     Any,
 )
 
+import numpy as np
+
 from deepmd.common import (
     make_default_mesh,
+)
+from deepmd.dpmodel.common import (
+    to_numpy_array,
 )
 from deepmd.dpmodel.utils.nlist import (
     build_neighbor_list,
@@ -12,6 +17,9 @@ from deepmd.dpmodel.utils.nlist import (
 )
 
 from ..common import (
+    INSTALLED_ARRAY_API_STRICT,
+    INSTALLED_JAX,
+    INSTALLED_PD,
     INSTALLED_PT,
     INSTALLED_TF,
 )
@@ -28,6 +36,21 @@ if INSTALLED_TF:
     from deepmd.tf.env import (
         GLOBAL_TF_FLOAT_PRECISION,
         tf,
+    )
+if INSTALLED_JAX:
+    from deepmd.jax.env import (
+        jnp,
+    )
+if INSTALLED_ARRAY_API_STRICT:
+    import array_api_strict
+
+if INSTALLED_PD:
+    import paddle
+
+    from deepmd.pd.utils.env import DEVICE as PD_DEVICE
+    from deepmd.pd.utils.nlist import build_neighbor_list as build_neighbor_list_pd
+    from deepmd.pd.utils.nlist import (
+        extend_coord_with_ghosts as extend_coord_with_ghosts_pd,
     )
 
 
@@ -98,4 +121,78 @@ class DescriptorTest:
         return [
             x.detach().cpu().numpy() if torch.is_tensor(x) else x
             for x in pt_obj(ext_coords, ext_atype, nlist=nlist, mapping=mapping)
+        ]
+
+    def eval_jax_descriptor(
+        self, jax_obj: Any, natoms, coords, atype, box, mixed_types: bool = False
+    ) -> Any:
+        ext_coords, ext_atype, mapping = extend_coord_with_ghosts(
+            jnp.array(coords).reshape(1, -1, 3),
+            jnp.array(atype).reshape(1, -1),
+            jnp.array(box).reshape(1, 3, 3),
+            jax_obj.get_rcut(),
+        )
+        nlist = build_neighbor_list(
+            ext_coords,
+            ext_atype,
+            natoms[0],
+            jax_obj.get_rcut(),
+            jax_obj.get_sel(),
+            distinguish_types=(not mixed_types),
+        )
+        return [
+            np.asarray(x) if isinstance(x, jnp.ndarray) else x
+            for x in jax_obj(ext_coords, ext_atype, nlist=nlist, mapping=mapping)
+        ]
+
+    def eval_pd_descriptor(
+        self, pd_obj: Any, natoms, coords, atype, box, mixed_types: bool = False
+    ) -> Any:
+        ext_coords, ext_atype, mapping = extend_coord_with_ghosts_pd(
+            paddle.to_tensor(coords).to(PD_DEVICE).reshape([1, -1, 3]),
+            paddle.to_tensor(atype).to(PD_DEVICE).reshape([1, -1]),
+            paddle.to_tensor(box).to(PD_DEVICE).reshape([1, 3, 3]),
+            pd_obj.get_rcut(),
+        )
+        nlist = build_neighbor_list_pd(
+            ext_coords,
+            ext_atype,
+            natoms[0],
+            pd_obj.get_rcut(),
+            pd_obj.get_sel(),
+            distinguish_types=(not mixed_types),
+        )
+        return [
+            x.detach().cpu().numpy() if paddle.is_tensor(x) else x
+            for x in pd_obj(ext_coords, ext_atype, nlist=nlist, mapping=mapping)
+        ]
+
+    def eval_array_api_strict_descriptor(
+        self,
+        array_api_strict_obj: Any,
+        natoms,
+        coords,
+        atype,
+        box,
+        mixed_types: bool = False,
+    ) -> Any:
+        ext_coords, ext_atype, mapping = extend_coord_with_ghosts(
+            array_api_strict.asarray(coords.reshape(1, -1, 3)),
+            array_api_strict.asarray(atype.reshape(1, -1)),
+            array_api_strict.asarray(box.reshape(1, 3, 3)),
+            array_api_strict_obj.get_rcut(),
+        )
+        nlist = build_neighbor_list(
+            ext_coords,
+            ext_atype,
+            natoms[0],
+            array_api_strict_obj.get_rcut(),
+            array_api_strict_obj.get_sel(),
+            distinguish_types=(not mixed_types),
+        )
+        return [
+            to_numpy_array(x) if hasattr(x, "__array_namespace__") else x
+            for x in array_api_strict_obj(
+                ext_coords, ext_atype, nlist=nlist, mapping=mapping
+            )
         ]

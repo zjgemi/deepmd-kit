@@ -17,16 +17,20 @@ from .ener_spin import (
 from .loss import (
     TaskLoss,
 )
+from .property import (
+    PropertyLoss,
+)
 from .tensor import (
     TensorLoss,
 )
 
 __all__ = [
-    "DenoiseLoss",
-    "EnergyStdLoss",
-    "EnergySpinLoss",
-    "TensorLoss",
-    "TaskLoss",
     "DOSLoss",
+    "DenoiseLoss",
+    "EnergySpinLoss",
+    "EnergyStdLoss",
     "GridDensityLoss",
+    "PropertyLoss",
+    "TaskLoss",
+    "TensorLoss",
 ]

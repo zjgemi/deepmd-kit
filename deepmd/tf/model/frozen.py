@@ -6,9 +6,8 @@ from enum import (
     Enum,
 )
 from typing import (
-    List,
+    NoReturn,
     Optional,
-    Tuple,
     Union,
 )
 
@@ -58,7 +57,7 @@ class FrozenModel(Model):
         The path to the frozen model
     """
 
-    def __init__(self, model_file: str, **kwargs):
+    def __init__(self, model_file: str, **kwargs) -> None:
         super().__init__(**kwargs)
         self.model_file = model_file
         if not model_file.endswith(".pb"):
@@ -201,7 +200,7 @@ class FrozenModel(Model):
     def get_ntypes(self) -> int:
         return self.model.get_ntypes()
 
-    def data_stat(self, data):
+    def data_stat(self, data) -> None:
         pass
 
     def init_variables(
@@ -244,15 +243,15 @@ class FrozenModel(Model):
     def update_sel(
         cls,
         train_data: DeepmdDataSystem,
-        type_map: Optional[List[str]],
+        type_map: Optional[list[str]],
         local_jdata: dict,
-    ) -> Tuple[dict, Optional[float]]:
+    ) -> tuple[dict, Optional[float]]:
         """Update the selection and perform neighbor statistics.
 
         Parameters
         ----------
         train_data : DeepmdDataSystem
-            data used to do neighbor statictics
+            data used to do neighbor statistics
         type_map : list[str], optional
             The name of each type of atoms
         local_jdata : dict
@@ -281,11 +280,11 @@ class FrozenModel(Model):
         return model.serialize()
 
     @classmethod
-    def deserialize(cls, data: dict, suffix: str = ""):
+    def deserialize(cls, data: dict, suffix: str = "") -> NoReturn:
         raise RuntimeError("Should not touch here.")
 
     @property
-    def input_requirement(self) -> List[DataRequirementItem]:
+    def input_requirement(self) -> list[DataRequirementItem]:
         """Return data requirements needed for the model input."""
         data_requirement = []
         numb_fparam = self.model.get_dim_fparam()

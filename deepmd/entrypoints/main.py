@@ -24,6 +24,9 @@ from deepmd.entrypoints.gui import (
 from deepmd.entrypoints.neighbor_stat import (
     neighbor_stat,
 )
+from deepmd.entrypoints.show import (
+    show,
+)
 from deepmd.entrypoints.test import (
     test,
 )
@@ -35,12 +38,12 @@ from deepmd.loggers.loggers import (
 )
 
 
-def main(args: argparse.Namespace):
+def main(args: argparse.Namespace) -> None:
     """DeePMD-Kit entry point.
 
     Parameters
     ----------
-    args : List[str] or argparse.Namespace, optional
+    args : list[str] or argparse.Namespace, optional
         list of command line arguments, used to avoid calling from the subprocess,
         as it is quite slow to import tensorflow; if Namespace is given, it will
         be used directly
@@ -81,5 +84,7 @@ def main(args: argparse.Namespace):
         start_dpgui(**dict_args)
     elif args.command == "convert-backend":
         convert_backend(**dict_args)
+    elif args.command == "show":
+        show(**dict_args)
     else:
         raise ValueError(f"Unknown command: {args.command}")

@@ -15,6 +15,7 @@ from deepmd.env import (
 )
 
 SAMPLER_RECORD = os.environ.get("SAMPLER_RECORD", False)
+DP_DTYPE_PROMOTION_STRICT = os.environ.get("DP_DTYPE_PROMOTION_STRICT", "0") == "1"
 try:
     # only linux
     ncpus = len(os.sched_getaffinity(0))
@@ -74,18 +75,18 @@ if intra_nthreads > 0:
     torch.set_num_threads(intra_nthreads)
 
 __all__ = [
+    "CACHE_PER_SYS",
+    "DEFAULT_PRECISION",
+    "DEVICE",
+    "ENERGY_BIAS_TRAINABLE",
     "GLOBAL_ENER_FLOAT_PRECISION",
     "GLOBAL_NP_FLOAT_PRECISION",
-    "GLOBAL_PT_FLOAT_PRECISION",
     "GLOBAL_PT_ENER_FLOAT_PRECISION",
-    "DEFAULT_PRECISION",
+    "GLOBAL_PT_FLOAT_PRECISION",
+    "JIT",
+    "LOCAL_RANK",
+    "NUM_WORKERS",
     "PRECISION_DICT",
     "RESERVED_PRECISON_DICT",
     "SAMPLER_RECORD",
-    "NUM_WORKERS",
-    "DEVICE",
-    "JIT",
-    "CACHE_PER_SYS",
-    "ENERGY_BIAS_TRAINABLE",
-    "LOCAL_RANK",
 ]

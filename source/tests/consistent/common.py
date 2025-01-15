@@ -3,6 +3,7 @@ import inspect
 import itertools
 import os
 import sys
+import unittest
 from abc import (
     ABC,
     abstractmethod,
@@ -10,14 +11,14 @@ from abc import (
 from enum import (
     Enum,
 )
+from importlib.util import (
+    find_spec,
+)
 from typing import (
     Any,
     Callable,
     ClassVar,
-    Dict,
-    List,
     Optional,
-    Tuple,
     Union,
 )
 from uuid import (
@@ -33,11 +34,19 @@ from deepmd.backend.tensorflow import (
     Backend,
 )
 
+from ..utils import (
+    CI,
+    TEST_DEVICE,
+)
+
 INSTALLED_TF = Backend.get_backend("tensorflow")().is_available()
 INSTALLED_PT = Backend.get_backend("pytorch")().is_available()
+INSTALLED_JAX = Backend.get_backend("jax")().is_available()
+INSTALLED_PD = Backend.get_backend("paddle")().is_available()
+INSTALLED_ARRAY_API_STRICT = find_spec("array_api_strict") is not None
 
-if os.environ.get("CI") and not (INSTALLED_TF and INSTALLED_PT):
-    raise ImportError("TensorFlow or PyTorch should be tested in the CI")
+if os.environ.get("CI") and not (INSTALLED_TF and INSTALLED_PT and INSTALLED_PD):
+    raise ImportError("TensorFlow, PyTorch or Paddle should be tested in the CI")
 
 
 if INSTALLED_TF:
@@ -54,16 +63,22 @@ if INSTALLED_TF:
 
 
 __all__ = [
-    "CommonTest",
-    "INSTALLED_TF",
+    "INSTALLED_ARRAY_API_STRICT",
+    "INSTALLED_JAX",
+    "INSTALLED_PD",
     "INSTALLED_PT",
+    "INSTALLED_TF",
+    "CommonTest",
+    "CommonTest",
 ]
+
+SKIP_FLAG = object()
 
 
 class CommonTest(ABC):
     data: ClassVar[dict]
     """Arguments data."""
-    addtional_data: ClassVar[dict] = {}
+    additional_data: ClassVar[dict] = {}
     """Additional data that will not be checked."""
     tf_class: ClassVar[Optional[type]]
     """TensorFlow model class."""
@@ -71,7 +86,12 @@ class CommonTest(ABC):
     """Native DP model class."""
     pt_class: ClassVar[Optional[type]]
     """PyTorch model class."""
-    args: ClassVar[Optional[Union[Argument, List[Argument]]]]
+    jax_class: ClassVar[Optional[type]]
+    """JAX model class."""
+    pd_class: ClassVar[Optional[type]]
+    """Paddle model class."""
+    array_api_strict_class: ClassVar[Optional[type]]
+    args: ClassVar[Optional[Union[Argument, list[Argument]]]]
     """Arguments that maps to the `data`."""
     skip_dp: ClassVar[bool] = False
     """Whether to skip the native DP model."""
@@ -79,15 +99,22 @@ class CommonTest(ABC):
     """Whether to skip the TensorFlow model."""
     skip_pt: ClassVar[bool] = not INSTALLED_PT
     """Whether to skip the PyTorch model."""
+    # we may usually skip jax before jax is fully supported
+    skip_jax: ClassVar[bool] = True
+    """Whether to skip the JAX model."""
+    skip_pd: ClassVar[bool] = True
+    """Whether to skip the Paddle model."""
+    skip_array_api_strict: ClassVar[bool] = True
+    """Whether to skip the array_api_strict model."""
     rtol = 1e-10
     """Relative tolerance for comparing the return value. Override for float32."""
     atol = 1e-10
     """Absolute tolerance for comparing the return value. Override for float32."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.unique_id = uuid4().hex
 
-    def reset_unique_id(self):
+    def reset_unique_id(self) -> None:
         self.unique_id = uuid4().hex
 
     def init_backend_cls(self, cls) -> Any:
@@ -108,10 +135,10 @@ class CommonTest(ABC):
 
     def pass_data_to_cls(self, cls, data) -> Any:
         """Pass data to the class."""
-        return cls(**data, **self.addtional_data)
+        return cls(**data, **self.additional_data)
 
     @abstractmethod
-    def build_tf(self, obj: Any, suffix: str) -> Tuple[list, dict]:
+    def build_tf(self, obj: Any, suffix: str) -> tuple[list, dict]:
         """Build the TF graph.
 
         Parameters
@@ -149,15 +176,48 @@ class CommonTest(ABC):
             The object of PT
         """
 
+    def eval_jax(self, jax_obj: Any) -> Any:
+        """Evaluate the return value of JAX.
+
+        Parameters
+        ----------
+        jax_obj : Any
+            The object of JAX
+        """
+        raise NotImplementedError("Not implemented")
+
+    def eval_pd(self, pd_obj: Any) -> Any:
+        """Evaluate the return value of PD.
+
+        Parameters
+        ----------
+        pd_obj : Any
+            The object of PD
+        """
+        raise NotImplementedError("Not implemented")
+
+    def eval_array_api_strict(self, array_api_strict_obj: Any) -> Any:
+        """Evaluate the return value of array_api_strict.
+
+        Parameters
+        ----------
+        array_api_strict_obj : Any
+            The object of array_api_strict
+        """
+        raise NotImplementedError("Not implemented")
+
     class RefBackend(Enum):
         """Reference backend."""
 
         TF = 1
         DP = 2
         PT = 3
+        PD = 4
+        JAX = 5
+        ARRAY_API_STRICT = 6
 
     @abstractmethod
-    def extract_ret(self, ret: Any, backend: RefBackend) -> Tuple[np.ndarray, ...]:
+    def extract_ret(self, ret: Any, backend: RefBackend) -> tuple[np.ndarray, ...]:
         """Extract the return value when comparing with other backends.
 
         Parameters
@@ -175,7 +235,7 @@ class CommonTest(ABC):
 
     def build_eval_tf(
         self, sess: "tf.Session", obj: Any, suffix: str
-    ) -> List[np.ndarray]:
+    ) -> list[np.ndarray]:
         """Build and evaluate the TF graph."""
         t_out, feed_dict = self.build_tf(obj, suffix)
 
@@ -215,6 +275,21 @@ class CommonTest(ABC):
         data = obj.serialize()
         return ret, data
 
+    def get_jax_ret_serialization_from_cls(self, obj):
+        ret = self.eval_jax(obj)
+        data = obj.serialize()
+        return ret, data
+
+    def get_pd_ret_serialization_from_cls(self, obj):
+        ret = self.eval_pd(obj)
+        data = obj.serialize()
+        return ret, data
+
+    def get_array_api_strict_ret_serialization_from_cls(self, obj):
+        ret = self.eval_array_api_strict(obj)
+        data = obj.serialize()
+        return ret, data
+
     def get_reference_backend(self):
         """Get the reference backend.
 
@@ -226,6 +301,12 @@ class CommonTest(ABC):
             return self.RefBackend.TF
         if not self.skip_pt:
             return self.RefBackend.PT
+        if not self.skip_jax:
+            return self.RefBackend.JAX
+        if not self.skip_pd:
+            return self.RefBackend.PD
+        if not self.skip_array_api_strict:
+            return self.RefBackend.ARRAY_API_STRICT
         raise ValueError("No available reference")
 
     def get_reference_ret_serialization(self, ref: RefBackend):
@@ -239,9 +320,18 @@ class CommonTest(ABC):
         if ref == self.RefBackend.PT:
             obj = self.init_backend_cls(self.pt_class)
             return self.get_pt_ret_serialization_from_cls(obj)
+        if ref == self.RefBackend.JAX:
+            obj = self.init_backend_cls(self.jax_class)
+            return self.get_jax_ret_serialization_from_cls(obj)
+        if ref == self.RefBackend.PD:
+            obj = self.init_backend_cls(self.pd_class)
+            return self.get_pd_ret_serialization_from_cls(obj)
+        if ref == self.RefBackend.ARRAY_API_STRICT:
+            obj = self.init_backend_cls(self.array_api_strict_class)
+            return self.get_array_api_strict_ret_serialization_from_cls(obj)
         raise ValueError("No available reference")
 
-    def test_tf_consistent_with_ref(self):
+    def test_tf_consistent_with_ref(self) -> None:
         """Test whether TF and reference are consistent."""
         if self.skip_tf:
             self.skipTest("Unsupported backend")
@@ -271,7 +361,7 @@ class CommonTest(ABC):
             )
             assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
 
-    def test_tf_self_consistent(self):
+    def test_tf_self_consistent(self) -> None:
         """Test whether TF is self consistent."""
         if self.skip_tf:
             self.skipTest("Unsupported backend")
@@ -286,7 +376,8 @@ class CommonTest(ABC):
             np.testing.assert_allclose(rr1, rr2, rtol=self.rtol, atol=self.atol)
             assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
 
-    def test_dp_consistent_with_ref(self):
+    @unittest.skipIf(TEST_DEVICE != "cpu" and CI, "Only test on CPU.")
+    def test_dp_consistent_with_ref(self) -> None:
         """Test whether DP and reference are consistent."""
         if self.skip_dp:
             self.skipTest("Unsupported backend")
@@ -301,10 +392,13 @@ class CommonTest(ABC):
         data2 = dp_obj.serialize()
         np.testing.assert_equal(data1, data2)
         for rr1, rr2 in zip(ret1, ret2):
+            if rr1 is SKIP_FLAG or rr2 is SKIP_FLAG:
+                continue
             np.testing.assert_allclose(rr1, rr2, rtol=self.rtol, atol=self.atol)
             assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
 
-    def test_dp_self_consistent(self):
+    @unittest.skipIf(TEST_DEVICE != "cpu" and CI, "Only test on CPU.")
+    def test_dp_self_consistent(self) -> None:
         """Test whether DP is self consistent."""
         if self.skip_dp:
             self.skipTest("Unsupported backend")
@@ -320,7 +414,7 @@ class CommonTest(ABC):
             else:
                 self.assertEqual(rr1, rr2)
 
-    def test_pt_consistent_with_ref(self):
+    def test_pt_consistent_with_ref(self) -> None:
         """Test whether PT and reference are consistent."""
         if self.skip_pt:
             self.skipTest("Unsupported backend")
@@ -343,7 +437,7 @@ class CommonTest(ABC):
             np.testing.assert_allclose(rr1, rr2, rtol=self.rtol, atol=self.atol)
             assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
 
-    def test_pt_self_consistent(self):
+    def test_pt_self_consistent(self) -> None:
         """Test whether PT is self consistent."""
         if self.skip_pt:
             self.skipTest("Unsupported backend")
@@ -351,6 +445,115 @@ class CommonTest(ABC):
         ret1, data1 = self.get_pt_ret_serialization_from_cls(obj1)
         obj2 = self.pt_class.deserialize(data1)
         ret2, data2 = self.get_pt_ret_serialization_from_cls(obj2)
+        np.testing.assert_equal(data1, data2)
+        for rr1, rr2 in zip(ret1, ret2):
+            if isinstance(rr1, np.ndarray) and isinstance(rr2, np.ndarray):
+                np.testing.assert_allclose(rr1, rr2, rtol=self.rtol, atol=self.atol)
+                assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
+            else:
+                self.assertEqual(rr1, rr2)
+
+    def test_jax_consistent_with_ref(self) -> None:
+        """Test whether JAX and reference are consistent."""
+        if self.skip_jax:
+            self.skipTest("Unsupported backend")
+        ref_backend = self.get_reference_backend()
+        if ref_backend == self.RefBackend.JAX:
+            self.skipTest("Reference is self")
+        ret1, data1 = self.get_reference_ret_serialization(ref_backend)
+        ret1 = self.extract_ret(ret1, ref_backend)
+        jax_obj = self.jax_class.deserialize(data1)
+        ret2 = self.eval_jax(jax_obj)
+        ret2 = self.extract_ret(ret2, self.RefBackend.JAX)
+        data2 = jax_obj.serialize()
+        np.testing.assert_equal(data1, data2)
+        for rr1, rr2 in zip(ret1, ret2):
+            np.testing.assert_allclose(rr1, rr2, rtol=self.rtol, atol=self.atol)
+            assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
+
+    def test_jax_self_consistent(self) -> None:
+        """Test whether JAX is self consistent."""
+        if self.skip_jax:
+            self.skipTest("Unsupported backend")
+        obj1 = self.init_backend_cls(self.jax_class)
+        ret1, data1 = self.get_jax_ret_serialization_from_cls(obj1)
+        obj1 = self.jax_class.deserialize(data1)
+        ret2, data2 = self.get_jax_ret_serialization_from_cls(obj1)
+        np.testing.assert_equal(data1, data2)
+        for rr1, rr2 in zip(ret1, ret2):
+            if isinstance(rr1, np.ndarray) and isinstance(rr2, np.ndarray):
+                np.testing.assert_allclose(rr1, rr2, rtol=self.rtol, atol=self.atol)
+                assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
+            else:
+                self.assertEqual(rr1, rr2)
+
+    def test_pd_consistent_with_ref(self):
+        """Test whether PD and reference are consistent."""
+        if self.skip_pd:
+            self.skipTest("Unsupported backend")
+        ref_backend = self.get_reference_backend()
+        if ref_backend == self.RefBackend.PD:
+            self.skipTest("Reference is self")
+        ret1, data1 = self.get_reference_ret_serialization(ref_backend)
+        ret1 = self.extract_ret(ret1, ref_backend)
+        obj = self.pd_class.deserialize(data1)
+        ret2 = self.eval_pd(obj)
+        ret2 = self.extract_ret(ret2, self.RefBackend.PD)
+        data2 = obj.serialize()
+        if obj.__class__.__name__.startswith(("Polar", "Dipole", "DOS")):
+            # tf, pd serialization mismatch
+            common_keys = set(data1.keys()) & set(data2.keys())
+            data1 = {k: data1[k] for k in common_keys}
+            data2 = {k: data2[k] for k in common_keys}
+        np.testing.assert_equal(data1, data2)
+        for rr1, rr2 in zip(ret1, ret2):
+            np.testing.assert_allclose(rr1, rr2, rtol=self.rtol, atol=self.atol)
+            assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
+
+    def test_pd_self_consistent(self):
+        """Test whether PD is self consistent."""
+        if self.skip_pd:
+            self.skipTest("Unsupported backend")
+        obj1 = self.init_backend_cls(self.pd_class)
+        ret1, data1 = self.get_pd_ret_serialization_from_cls(obj1)
+        obj2 = self.pd_class.deserialize(data1)
+        ret2, data2 = self.get_pd_ret_serialization_from_cls(obj2)
+        np.testing.assert_equal(data1, data2)
+        for rr1, rr2 in zip(ret1, ret2):
+            if isinstance(rr1, np.ndarray) and isinstance(rr2, np.ndarray):
+                np.testing.assert_allclose(rr1, rr2, rtol=self.rtol, atol=self.atol)
+                assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
+            else:
+                self.assertEqual(rr1, rr2)
+
+    @unittest.skipIf(TEST_DEVICE != "cpu" and CI, "Only test on CPU.")
+    def test_array_api_strict_consistent_with_ref(self) -> None:
+        """Test whether array_api_strict and reference are consistent."""
+        if self.skip_array_api_strict:
+            self.skipTest("Unsupported backend")
+        ref_backend = self.get_reference_backend()
+        if ref_backend == self.RefBackend.ARRAY_API_STRICT:
+            self.skipTest("Reference is self")
+        ret1, data1 = self.get_reference_ret_serialization(ref_backend)
+        ret1 = self.extract_ret(ret1, ref_backend)
+        array_api_strict_obj = self.array_api_strict_class.deserialize(data1)
+        ret2 = self.eval_array_api_strict(array_api_strict_obj)
+        ret2 = self.extract_ret(ret2, self.RefBackend.ARRAY_API_STRICT)
+        data2 = array_api_strict_obj.serialize()
+        np.testing.assert_equal(data1, data2)
+        for rr1, rr2 in zip(ret1, ret2):
+            np.testing.assert_allclose(rr1, rr2, rtol=self.rtol, atol=self.atol)
+            assert rr1.dtype == rr2.dtype, f"{rr1.dtype} != {rr2.dtype}"
+
+    @unittest.skipIf(TEST_DEVICE != "cpu" and CI, "Only test on CPU.")
+    def test_array_api_strict_self_consistent(self) -> None:
+        """Test whether array_api_strict is self consistent."""
+        if self.skip_array_api_strict:
+            self.skipTest("Unsupported backend")
+        obj1 = self.init_backend_cls(self.array_api_strict_class)
+        ret1, data1 = self.get_array_api_strict_ret_serialization_from_cls(obj1)
+        obj1 = self.array_api_strict_class.deserialize(data1)
+        ret2, data2 = self.get_array_api_strict_ret_serialization_from_cls(obj1)
         np.testing.assert_equal(data1, data2)
         for rr1, rr2 in zip(ret1, ret2):
             if isinstance(rr1, np.ndarray) and isinstance(rr2, np.ndarray):
@@ -368,7 +571,7 @@ class CommonTest(ABC):
 def parameterized(*attrs: tuple, **subblock_attrs: tuple) -> Callable:
     """Parameterized test.
 
-    Orginal class will not be actually generated. Avoid inherbiting from it.
+    Original class will not be actually generated. Avoid inherbiting from it.
     New classes are generated with the name of the original class and the
     parameters.
 
@@ -430,7 +633,7 @@ def parameterized(*attrs: tuple, **subblock_attrs: tuple) -> Callable:
 
 def parameterize_func(
     func: Callable,
-    param_dict_list: Dict[str, Tuple],
+    param_dict_list: dict[str, tuple],
 ):
     """Parameterize functions with different default values.
 
@@ -438,7 +641,7 @@ def parameterize_func(
     ----------
     func : Callable
         The base function.
-    param_dict_list : Dict[str, Tuple]
+    param_dict_list : dict[str, Tuple]
         Dictionary of parameters with default values to be changed in base function, each of which is a tuple of choices.
 
     Returns

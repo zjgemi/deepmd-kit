@@ -40,15 +40,15 @@ INPUT = os.path.join(modifier_datapath, "dipole.json")
 
 
 class TestDataModifier(tf.test.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         # with tf.variable_scope('load', reuse = False) :
         tf.reset_default_graph()
         self._setUp()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         tf.reset_default_graph()
 
-    def _setUp(self):
+    def _setUp(self) -> None:
         run_opt = RunOptions(
             restart=None, init_model=None, log_path=None, log_level=30, mpi_log="master"
         )
@@ -91,11 +91,11 @@ class TestDataModifier(tf.test.TestCase):
             with tf.gfile.GFile(output_graph, "wb") as f:
                 f.write(output_graph_def.SerializeToString())
 
-    def test_fv(self):
+    def test_fv(self) -> None:
         # with tf.variable_scope('load', reuse = False) :
         self._test_fv()
 
-    def _test_fv(self):
+    def _test_fv(self) -> None:
         dcm = DipoleChargeModifier(
             str(tests_path / os.path.join(modifier_datapath, "dipole.pb")),
             [-8],
@@ -128,7 +128,7 @@ class TestDataModifier(tf.test.TestCase):
                 vf[:, ii].ravel(),
                 num_f.ravel(),
                 places,
-                err_msg="dof %d does not match" % (ii),
+                err_msg=f"dof {ii} does not match",
             )
 
         box3 = np.reshape(box, [nframes, 3, 3])

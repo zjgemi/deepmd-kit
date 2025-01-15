@@ -10,7 +10,6 @@ from pathlib import (
 )
 from typing import (
     Any,
-    Dict,
 )
 
 import numpy as np
@@ -29,6 +28,8 @@ from deepmd.pt.loss import (
     EnergySpinLoss,
     EnergyStdLoss,
     GridDensityLoss,
+    PropertyLoss,
+    TaskLoss,
     TensorLoss,
 )
 from deepmd.pt.model.model import (
@@ -47,7 +48,7 @@ from deepmd.pt.utils import (
 )
 from deepmd.pt.utils.dataloader import (
     BufferedIterator,
-    get_weighted_sampler,
+    get_sampler_from_params,
 )
 from deepmd.pt.utils.env import (
     DEVICE,
@@ -72,10 +73,7 @@ from deepmd.utils.data import (
 if torch.__version__.startswith("2"):
     import torch._dynamo
 
-import os
-
 import torch.distributed as dist
-import wandb as wb
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import (
     DataLoader,
@@ -91,7 +89,7 @@ log = logging.getLogger(__name__)
 class Trainer:
     def __init__(
         self,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         training_data,
         stat_file_path=None,
         validation_data=None,
@@ -102,7 +100,7 @@ class Trainer:
         shared_links=None,
         finetune_links=None,
         init_frz_model=None,
-    ):
+    ) -> None:
         """Construct a DeePMD trainer.
 
         Args:
@@ -150,33 +148,6 @@ class Trainer:
         )
         self.lcurve_should_print_header = True
 
-        # Init wandb
-        self.wandb_config = training_params.get("wandb_config", {})
-        self.wandb_enabled = self.wandb_config.get("wandb_enabled", False)
-        self.wandb_log_model = self.wandb_config.get("wandb_log_model", False)
-        self.wandb_log_model_freq = self.wandb_config.get("wandb_log_model_freq", 100)
-        if self.wandb_enabled:
-            entity = self.wandb_config.get("entity", None)
-            assert (
-                entity is not None
-            ), "The parameter 'entity' of wandb must be specified."
-            project = self.wandb_config.get("project", None)
-            assert (
-                project is not None
-            ), "The parameter 'project' of wandb must be specified."
-            job_name = self.wandb_config.get("job_name", None)
-            if job_name is None:
-                name_path = os.path.abspath(".").split("/")
-                job_name = name_path[-2] + "/" + name_path[-1]
-            if self.rank == 0:
-                wb.init(
-                    project=project,
-                    entity=entity,
-                    config=model_params,
-                    name=job_name,
-                    settings=wb.Settings(start_method="fork"),
-                )
-
         def get_opt_param(params):
             opt_type = params.get("opt_type", "Adam")
             opt_param = {
@@ -190,19 +161,7 @@ class Trainer:
 
         def get_data_loader(_training_data, _validation_data, _training_params):
             def get_dataloader_and_buffer(_data, _params):
-                if "auto_prob" in _training_params["training_data"]:
-                    _sampler = get_weighted_sampler(
-                        _data, _params["training_data"]["auto_prob"]
-                    )
-                elif "sys_probs" in _training_params["training_data"]:
-                    _sampler = get_weighted_sampler(
-                        _data,
-                        _params["training_data"]["sys_probs"],
-                        sys_prob=True,
-                    )
-                else:
-                    _sampler = get_weighted_sampler(_data, "prob_sys_size")
-
+                _sampler = get_sampler_from_params(_data, _params)
                 if _sampler is None:
                     log.warning(
                         "Sampler not specified!"
@@ -223,14 +182,16 @@ class Trainer:
                 return _dataloader, _data_buffered
 
             training_dataloader, training_data_buffered = get_dataloader_and_buffer(
-                _training_data, _training_params
+                _training_data, _training_params["training_data"]
             )
 
             if _validation_data is not None:
                 (
                     validation_dataloader,
                     validation_data_buffered,
-                ) = get_dataloader_and_buffer(_validation_data, _training_params)
+                ) = get_dataloader_and_buffer(
+                    _validation_data, _training_params["validation_data"]
+                )
                 valid_numb_batch = _training_params["validation_data"].get(
                     "numb_btch", 1
                 )
@@ -305,7 +266,7 @@ class Trainer:
             self.opt_type, self.opt_param = get_opt_param(training_params)
 
         # Model
-        self.model = get_model_for_wrapper(model_params)
+        self.model = get_model_for_wrapper(model_params, resuming=resuming)
 
         # Loss
         if not self.multi_task:
@@ -348,14 +309,14 @@ class Trainer:
                 self.validation_data,
                 self.valid_numb_batch,
             ) = get_data_loader(training_data, validation_data, training_params)
-            # training_data.print_summary(
-            #     "training", to_numpy_array(self.training_dataloader.sampler.weights)
-            # )
-            # if validation_data is not None:
-            #     validation_data.print_summary(
-            #         "validation",
-            #         to_numpy_array(self.validation_dataloader.sampler.weights),
-            #     )
+            training_data.print_summary(
+                "training", to_numpy_array(self.training_dataloader.sampler.weights)
+            )
+            if validation_data is not None:
+                validation_data.print_summary(
+                    "validation",
+                    to_numpy_array(self.validation_dataloader.sampler.weights),
+                )
         else:
             (
                 self.training_dataloader,
@@ -391,20 +352,20 @@ class Trainer:
                     training_params["data_dict"][model_key],
                 )
 
-                # training_data[model_key].print_summary(
-                #     f"training in {model_key}",
-                #     to_numpy_array(self.training_dataloader[model_key].sampler.weights),
-                # )
-                # if (
-                #     validation_data is not None
-                #     and validation_data[model_key] is not None
-                # ):
-                #     validation_data[model_key].print_summary(
-                #         f"validation in {model_key}",
-                #         to_numpy_array(
-                #             self.validation_dataloader[model_key].sampler.weights
-                #         ),
-                #     )
+                training_data[model_key].print_summary(
+                    f"training in {model_key}",
+                    to_numpy_array(self.training_dataloader[model_key].sampler.weights),
+                )
+                if (
+                    validation_data is not None
+                    and validation_data[model_key] is not None
+                ):
+                    validation_data[model_key].print_summary(
+                        f"validation in {model_key}",
+                        to_numpy_array(
+                            self.validation_dataloader[model_key].sampler.weights
+                        ),
+                    )
 
         # Learning rate
         self.warmup_steps = training_params.get("warmup_steps", 0)
@@ -431,7 +392,9 @@ class Trainer:
         optimizer_state_dict = None
         if resuming:
             log.info(f"Resuming from {resume_model}.")
-            state_dict = torch.load(resume_model, map_location=DEVICE)
+            state_dict = torch.load(
+                resume_model, map_location=DEVICE, weights_only=True
+            )
             if "model" in state_dict:
                 optimizer_state_dict = (
                     state_dict["optimizer"] if finetune_model is None else None
@@ -505,7 +468,7 @@ class Trainer:
                         _new_state_dict,
                         _origin_state_dict,
                         _random_state_dict,
-                    ):
+                    ) -> None:
                         _new_fitting = _finetune_rule_single.get_random_fitting()
                         _model_key_from = _finetune_rule_single.get_model_branch()
                         target_keys = [
@@ -514,7 +477,7 @@ class Trainer:
                             if i != "_extra_state" and f".{_model_key}." in i
                         ]
                         for item_key in target_keys:
-                            if _new_fitting and ".fitting_net." in item_key:
+                            if _new_fitting and (".descriptor." not in item_key):
                                 # print(f'Keep {item_key} in old model!')
                                 _new_state_dict[item_key] = (
                                     _random_state_dict[item_key].clone().detach()
@@ -617,7 +580,7 @@ class Trainer:
         # author: iProzd
         if self.opt_type == "Adam":
             self.optimizer = torch.optim.Adam(
-                self.wrapper.parameters(), lr=self.lr_exp.start_lr
+                self.wrapper.parameters(), lr=self.lr_exp.start_lr, fused=True
             )
             if optimizer_state_dict is not None and self.restart_training:
                 self.optimizer.load_state_dict(optimizer_state_dict)
@@ -655,7 +618,7 @@ class Trainer:
         self.profiling = training_params.get("profiling", False)
         self.profiling_file = training_params.get("profiling_file", "timeline.json")
 
-    def run(self):
+    def run(self) -> None:
         fout = (
             open(
                 self.disp_file,
@@ -689,14 +652,17 @@ class Trainer:
                 with_stack=True,
             )
             prof.start()
-        if self.wandb_enabled and self.wandb_log_model and self.rank == 0:
-            wb.watch(self.wrapper, log="all", log_freq=self.wandb_log_model_freq)
 
-        def step(_step_id, task_key="Default"):
+        def step(_step_id, task_key="Default") -> None:
+            if self.multi_task:
+                model_index = dp_random.choice(
+                    np.arange(self.num_model, dtype=np.int_),
+                    p=self.model_prob,
+                )
+                task_key = self.model_keys[model_index]
             # PyTorch Profiler
             if self.enable_profiler or self.profiling:
                 prof.step()
-            self.wrapper.train()
             if isinstance(self.lr_exp, dict):
                 _lr = self.lr_exp[task_key]
             else:
@@ -722,12 +688,11 @@ class Trainer:
                 )
                 loss.backward()
                 if self.gradient_max_norm > 0.0:
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        self.wrapper.parameters(), self.gradient_max_norm
+                    torch.nn.utils.clip_grad_norm_(
+                        self.wrapper.parameters(),
+                        self.gradient_max_norm,
+                        error_if_nonfinite=True,
                     )
-                    if not torch.isfinite(grad_norm).all():
-                        # check local gradnorm single GPU case, trigger NanDetector
-                        raise FloatingPointError("gradients are Nan/Inf")
                 with torch.device("cpu"):
                     self.optimizer.step()
                 self.scheduler.step()
@@ -802,8 +767,11 @@ class Trainer:
                 raise ValueError(f"Not supported optimizer type '{self.opt_type}'")
 
             # Log and persist
-            if self.display_in_training and _step_id % self.disp_freq == 0:
-                self.wrapper.eval()
+            display_step_id = _step_id + 1
+            if self.display_in_training and (
+                display_step_id % self.disp_freq == 0 or display_step_id == 1
+            ):
+                self.wrapper.eval()  # Will set to train mode before fininshing validation
 
                 def log_loss_train(_loss, _more_loss, _task_key="Default"):
                     results = {}
@@ -854,31 +822,26 @@ class Trainer:
                     if self.rank == 0:
                         log.info(
                             format_training_message_per_task(
-                                batch=_step_id,
+                                batch=display_step_id,
                                 task_name="trn",
                                 rmse=train_results,
                                 learning_rate=cur_lr,
                             )
                         )
-                        self.wandb_log(train_results, _step_id, "_train")
                         if valid_results:
                             log.info(
                                 format_training_message_per_task(
-                                    batch=_step_id,
+                                    batch=display_step_id,
                                     task_name="val",
                                     rmse=valid_results,
                                     learning_rate=None,
                                 )
                             )
-                            self.wandb_log(valid_results, _step_id, "_valid")
                 else:
                     train_results = {_key: {} for _key in self.model_keys}
                     valid_results = {_key: {} for _key in self.model_keys}
                     train_results[task_key] = log_loss_train(
                         loss, more_loss, _task_key=task_key
-                    )
-                    self.wandb_log(
-                        train_results[task_key], _step_id, f"_train_{task_key}"
                     )
                     for _key in self.model_keys:
                         if _key != task_key:
@@ -899,27 +862,22 @@ class Trainer:
                         if self.rank == 0:
                             log.info(
                                 format_training_message_per_task(
-                                    batch=_step_id,
+                                    batch=display_step_id,
                                     task_name=_key + "_trn",
                                     rmse=train_results[_key],
                                     learning_rate=cur_lr,
                                 )
                             )
-                            self.wandb_log(
-                                train_results[_key], _step_id, f"_train_{_key}"
-                            )
                             if valid_results[_key]:
                                 log.info(
                                     format_training_message_per_task(
-                                        batch=_step_id,
+                                        batch=display_step_id,
                                         task_name=_key + "_val",
                                         rmse=valid_results[_key],
                                         learning_rate=None,
                                     )
                                 )
-                                self.wandb_log(
-                                    valid_results[_key], _step_id, f"_valid_{_key}"
-                                )
+                self.wrapper.train()
 
                 current_time = time.time()
                 train_time = current_time - self.t0
@@ -927,15 +885,15 @@ class Trainer:
                 if self.rank == 0 and self.timing_in_training:
                     log.info(
                         format_training_message(
-                            batch=_step_id,
+                            batch=display_step_id,
                             wall_time=train_time,
                         )
                     )
-                self.wandb_log({"lr": cur_lr}, step_id)
                 # the first training time is not accurate
                 if (
-                    _step_id + 1
-                ) > self.disp_freq or self.num_steps < 2 * self.disp_freq:
+                    (_step_id + 1 - self.start_step) > self.disp_freq
+                    or self.num_steps - self.start_step < 2 * self.disp_freq
+                ):
                     self.total_train_time += train_time
 
                 if fout:
@@ -943,7 +901,7 @@ class Trainer:
                         self.print_header(fout, train_results, valid_results)
                         self.lcurve_should_print_header = False
                     self.print_on_training(
-                        fout, _step_id, cur_lr, train_results, valid_results
+                        fout, display_step_id, cur_lr, train_results, valid_results
                     )
 
             if (
@@ -965,30 +923,21 @@ class Trainer:
                     f.write(str(self.latest_model))
 
             # tensorboard
-            if self.enable_tensorboard and _step_id % self.tensorboard_freq == 0:
-                writer.add_scalar(f"{task_key}/lr", cur_lr, _step_id)
-                writer.add_scalar(f"{task_key}/loss", loss, _step_id)
+            if self.enable_tensorboard and (
+                display_step_id % self.tensorboard_freq == 0 or display_step_id == 1
+            ):
+                writer.add_scalar(f"{task_key}/lr", cur_lr, display_step_id)
+                writer.add_scalar(f"{task_key}/loss", loss, display_step_id)
                 for item in more_loss:
-                    writer.add_scalar(f"{task_key}/{item}", more_loss[item], _step_id)
+                    writer.add_scalar(
+                        f"{task_key}/{item}", more_loss[item], display_step_id
+                    )
 
+        self.wrapper.train()
         self.t0 = time.time()
         self.total_train_time = 0.0
-        for step_id in range(self.num_steps):
-            if step_id < self.start_step:
-                continue
-            if self.multi_task:
-                chosen_index_list = dp_random.choice(
-                    np.arange(self.num_model),  # pylint: disable=no-explicit-dtype
-                    p=np.array(self.model_prob),
-                    size=self.world_size,
-                    replace=True,
-                )
-                assert chosen_index_list.size == self.world_size
-                model_index = chosen_index_list[self.rank]
-                model_key = self.model_keys[model_index]
-            else:
-                model_key = "Default"
-            step(step_id, model_key)
+        for step_id in range(self.start_step, self.num_steps):
+            step(step_id)
             if JIT:
                 break
 
@@ -1026,13 +975,14 @@ class Trainer:
                 with open("checkpoint", "w") as f:
                     f.write(str(self.latest_model))
 
-            if self.timing_in_training and self.num_steps // self.disp_freq > 0:
-                if self.num_steps >= 2 * self.disp_freq:
+            elapsed_batch = self.num_steps - self.start_step
+            if self.timing_in_training and elapsed_batch // self.disp_freq > 0:
+                if self.start_step >= 2 * self.disp_freq:
                     log.info(
                         "average training time: %.4f s/batch (exclude first %d batches)",
                         self.total_train_time
                         / (
-                            self.num_steps // self.disp_freq * self.disp_freq
+                            elapsed_batch // self.disp_freq * self.disp_freq
                             - self.disp_freq
                         ),
                         self.disp_freq,
@@ -1041,7 +991,7 @@ class Trainer:
                     log.info(
                         "average training time: %.4f s/batch",
                         self.total_train_time
-                        / (self.num_steps // self.disp_freq * self.disp_freq),
+                        / (elapsed_batch // self.disp_freq * self.disp_freq),
                     )
 
             if JIT:
@@ -1068,16 +1018,19 @@ class Trainer:
                     f"The profiling trace have been saved to: {self.profiling_file}"
                 )
 
-    def save_model(self, save_path, lr=0.0, step=0):
+    def save_model(self, save_path, lr=0.0, step=0) -> None:
         module = (
             self.wrapper.module
             if dist.is_available() and dist.is_initialized()
             else self.wrapper
         )
-        module.train_infos["lr"] = lr
+        module.train_infos["lr"] = float(lr)
         module.train_infos["step"] = step
+        optim_state_dict = deepcopy(self.optimizer.state_dict())
+        for item in optim_state_dict["param_groups"]:
+            item["lr"] = float(item["lr"])
         torch.save(
-            {"model": module.state_dict(), "optimizer": self.optimizer.state_dict()},
+            {"model": module.state_dict(), "optimizer": optim_state_dict},
             save_path,
         )
         checkpoint_dir = save_path.parent
@@ -1168,16 +1121,10 @@ class Trainer:
         log_dict["sid"] = batch_data["sid"]
         return input_dict, label_dict, log_dict
 
-    def wandb_log(self, data: dict, step, type_suffix=""):
-        if not self.wandb_enabled or self.rank != 0:
-            return
-        for k, v in data.items():
-            wb.log({k + type_suffix: v}, step=step)
-
-    def print_header(self, fout, train_results, valid_results):
+    def print_header(self, fout, train_results, valid_results) -> None:
         train_keys = sorted(train_results.keys())
         print_str = ""
-        print_str += "# %5s" % "step"
+        print_str += "# {:5s}".format("step")
         if not self.multi_task:
             if valid_results:
                 prop_fmt = "   %11s %11s"
@@ -1200,15 +1147,17 @@ class Trainer:
                     prop_fmt = "   %11s"
                     for k in sorted(train_results[model_key].keys()):
                         print_str += prop_fmt % (k + f"_trn_{model_key}")
-        print_str += "   %8s\n" % "lr"
+        print_str += "   {:8s}\n".format("lr")
         print_str += "# If there is no available reference data, rmse_*_{val,trn} will print nan\n"
         fout.write(print_str)
         fout.flush()
 
-    def print_on_training(self, fout, step_id, cur_lr, train_results, valid_results):
+    def print_on_training(
+        self, fout, step_id, cur_lr, train_results, valid_results
+    ) -> None:
         train_keys = sorted(train_results.keys())
         print_str = ""
-        print_str += "%7d" % step_id
+        print_str += f"{step_id:7d}"
         if not self.multi_task:
             if valid_results:
                 prop_fmt = "   %11.2e %11.2e"
@@ -1294,8 +1243,17 @@ def get_loss(loss_params, start_lr, _ntypes, _model):
     elif loss_type == "grid_density":
         loss_params["starter_learning_rate"] = start_lr
         return GridDensityLoss(**loss_params)
+    elif loss_type == "property":
+        task_dim = _model.get_task_dim()
+        var_name = _model.get_var_name()
+        intensive = _model.get_intensive()
+        loss_params["task_dim"] = task_dim
+        loss_params["var_name"] = var_name
+        loss_params["intensive"] = intensive
+        return PropertyLoss(**loss_params)
     else:
-        raise NotImplementedError
+        loss_params["starter_learning_rate"] = start_lr
+        return TaskLoss.get_class_by_type(loss_type).get_loss(loss_params)
 
 
 def get_single_model(
@@ -1308,7 +1266,7 @@ def get_single_model(
     return model
 
 
-def get_model_for_wrapper(_model_params):
+def get_model_for_wrapper(_model_params, resuming=False):
     if "model_dict" not in _model_params:
         _model = get_single_model(
             _model_params,
@@ -1316,11 +1274,39 @@ def get_model_for_wrapper(_model_params):
     else:
         _model = {}
         model_keys = list(_model_params["model_dict"])
+        do_case_embd, case_embd_index = get_case_embd_config(_model_params)
         for _model_key in model_keys:
             _model[_model_key] = get_single_model(
                 _model_params["model_dict"][_model_key],
             )
+            if do_case_embd and not resuming:
+                # only set case_embd when from scratch multitask training
+                _model[_model_key].set_case_embd(case_embd_index[_model_key])
     return _model
+
+
+def get_case_embd_config(_model_params):
+    assert (
+        "model_dict" in _model_params
+    ), "Only support setting case embedding for multi-task model!"
+    model_keys = list(_model_params["model_dict"])
+    sorted_model_keys = sorted(model_keys)
+    numb_case_embd_list = [
+        _model_params["model_dict"][model_key]
+        .get("fitting_net", {})
+        .get("dim_case_embd", 0)
+        for model_key in sorted_model_keys
+    ]
+    if not all(item == numb_case_embd_list[0] for item in numb_case_embd_list):
+        raise ValueError(
+            f"All models must have the same dimension of case embedding, while the settings are: {numb_case_embd_list}"
+        )
+    if numb_case_embd_list[0] == 0:
+        return False, {}
+    case_embd_index = {
+        model_key: idx for idx, model_key in enumerate(sorted_model_keys)
+    }
+    return True, case_embd_index
 
 
 def model_change_out_bias(

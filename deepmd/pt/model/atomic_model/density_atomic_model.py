@@ -2,8 +2,6 @@
 import logging
 from typing import (
     Callable,
-    Dict,
-    List,
     Optional,
     Union,
 )
@@ -48,15 +46,6 @@ class DPDensityAtomicModel(DPAtomicModel):
             self.env_protection = 1e-6
         self.sel = self.descriptor.get_sel()
         self.nnei = self.descriptor.get_nsel()
-        self.axis_neuron = self.descriptor.axis_neuron
-        neurons = []
-        dims = [1 + self.descriptor.repinit_args.tebd_dim] + neurons + [self.descriptor.get_dim_out()]
-        self.grid_embedding_layers = torch.nn.ModuleList([MLPLayer(
-            dims[i],
-            dims[i+1],
-            precision=env.DEFAULT_PRECISION,
-            activation_function="tanh",
-        ) for i in range(len(neurons)+1)])
 
         wanted_shape = (1, self.nnei, 4)
         mean = torch.zeros(
@@ -76,11 +65,11 @@ class DPDensityAtomicModel(DPAtomicModel):
         mapping: Optional[torch.Tensor] = None,
         fparam: Optional[torch.Tensor] = None,
         aparam: Optional[torch.Tensor] = None,
-        comm_dict: Optional[Dict[str, torch.Tensor]] = None,
+        comm_dict: Optional[dict[str, torch.Tensor]] = None,
         grid: Optional[torch.Tensor] = None,
         grid_type: Optional[torch.Tensor] = None,
         grid_nlist: Optional[torch.Tensor] = None,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """Return atomic prediction.
 
         Parameters
@@ -161,11 +150,11 @@ class DPDensityAtomicModel(DPAtomicModel):
         mapping: Optional[torch.Tensor] = None,
         fparam: Optional[torch.Tensor] = None,
         aparam: Optional[torch.Tensor] = None,
-        comm_dict: Optional[Dict[str, torch.Tensor]] = None,
+        comm_dict: Optional[dict[str, torch.Tensor]] = None,
         grid: Optional[torch.Tensor] = None,
         grid_type: Optional[torch.Tensor] = None,
         grid_nlist: Optional[torch.Tensor] = None,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """Common interface for atomic inference.
 
         This method accept extended coordinates, extended atom typs, neighbor list,
@@ -254,8 +243,8 @@ class DPDensityAtomicModel(DPAtomicModel):
         mapping: Optional[torch.Tensor] = None,
         fparam: Optional[torch.Tensor] = None,
         aparam: Optional[torch.Tensor] = None,
-        comm_dict: Optional[Dict[str, torch.Tensor]] = None,
-    ) -> Dict[str, torch.Tensor]:
+        comm_dict: Optional[dict[str, torch.Tensor]] = None,
+    ) -> dict[str, torch.Tensor]:
         return self.forward_common_atomic(
             extended_coord,
             extended_atype,
@@ -268,7 +257,7 @@ class DPDensityAtomicModel(DPAtomicModel):
 
     def compute_or_load_out_stat(
         self,
-        merged: Union[Callable[[], List[dict]], List[dict]],
+        merged: Union[Callable[[], list[dict]], list[dict]],
         stat_file_path: Optional[DPPath] = None,
     ):
         """
@@ -276,11 +265,11 @@ class DPDensityAtomicModel(DPAtomicModel):
 
         Parameters
         ----------
-        merged : Union[Callable[[], List[dict]], List[dict]]
-            - List[dict]: A list of data samples from various data systems.
+        merged : Union[Callable[[], list[dict]], list[dict]]
+            - list[dict]: A list of data samples from various data systems.
                 Each element, `merged[i]`, is a data dictionary containing `keys`: `torch.Tensor`
                 originating from the `i`-th data system.
-            - Callable[[], List[dict]]: A lazy function that returns data samples in the above format
+            - Callable[[], list[dict]]: A lazy function that returns data samples in the above format
                 only when needed. Since the sampling process can be slow and memory-intensive,
                 the lazy function helps by only sampling once.
         stat_file_path : Optional[DPPath]

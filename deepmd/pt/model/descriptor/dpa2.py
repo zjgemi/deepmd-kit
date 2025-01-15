@@ -1,10 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 from typing import (
     Callable,
-    Dict,
-    List,
     Optional,
-    Tuple,
     Union,
 )
 
@@ -30,14 +27,21 @@ from deepmd.pt.model.network.network import (
 from deepmd.pt.utils import (
     env,
 )
+from deepmd.pt.utils.env import (
+    PRECISION_DICT,
+)
 from deepmd.pt.utils.nlist import (
     build_multiple_neighbor_list,
     get_multiple_nlist_key,
+)
+from deepmd.pt.utils.tabulate import (
+    DPTabulate,
 )
 from deepmd.pt.utils.update_sel import (
     UpdateSel,
 )
 from deepmd.pt.utils.utils import (
+    ActivationFn,
     to_numpy_array,
 )
 from deepmd.utils.data_system import (
@@ -87,17 +91,16 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         concat_output_tebd: bool = True,
         precision: str = "float64",
         smooth: bool = True,
-        exclude_types: List[Tuple[int, int]] = [],
+        exclude_types: list[tuple[int, int]] = [],
         env_protection: float = 0.0,
         trainable: bool = True,
-        seed: Optional[Union[int, List[int]]] = None,
+        seed: Optional[Union[int, list[int]]] = None,
         add_tebd_to_repinit_out: bool = False,
         use_econf_tebd: bool = False,
         use_tebd_bias: bool = False,
-        type_map: Optional[List[str]] = None,
-        old_impl: bool = False,
-    ):
-        r"""The DPA-2 descriptor. see https://arxiv.org/abs/2312.15492.
+        type_map: Optional[list[str]] = None,
+    ) -> None:
+        r"""The DPA-2 descriptor[1]_.
 
         Parameters
         ----------
@@ -111,7 +114,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
             The precision of the embedding net parameters.
         smooth : bool, optional
             Whether to use smoothness in processes such as attention weights calculation.
-        exclude_types : List[List[int]], optional
+        exclude_types : list[list[int]], optional
             The excluded pairs of types which have no interaction with each other.
             For example, `[[0, 1]]` means no interaction between type 0 and type 1.
         env_protection : float, optional
@@ -127,7 +130,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
             Whether to use electronic configuration type embedding.
         use_tebd_bias : bool, Optional
             Whether to use bias in the type embedding layer.
-        type_map : List[str], Optional
+        type_map : list[str], Optional
             A list of strings. Give the name to each type of atoms.
 
         Returns
@@ -144,6 +147,11 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         sw:                 torch.Tensor
             The switch function for decaying inverse distance.
 
+        References
+        ----------
+        .. [1] Zhang, D., Liu, X., Zhang, X. et al. DPA-2: a
+           large atomic model as a multi-task learner. npj
+           Comput Mater 10, 293 (2024). https://doi.org/10.1038/s41524-024-01493-2
         """
         super().__init__()
 
@@ -159,7 +167,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
 
         self.repinit_args = init_subclass_params(repinit, RepinitArgs)
         self.repformer_args = init_subclass_params(repformer, RepformerArgs)
-        self.axis_neuron = self.repinit_args.axis_neuron
+        self.tebd_input_mode = self.repinit_args.tebd_input_mode
 
         self.repinit = DescrptBlockSeAtten(
             self.repinit_args.rcut,
@@ -239,7 +247,6 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
             g1_out_conv=self.repformer_args.g1_out_conv,
             g1_out_mlp=self.repformer_args.g1_out_mlp,
             seed=child_seed(seed, 1),
-            old_impl=old_impl,
         )
         self.rcsl_list = [
             (self.repformers.get_rcut(), self.repformers.get_nsel()),
@@ -270,6 +277,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         )
         self.concat_output_tebd = concat_output_tebd
         self.precision = precision
+        self.prec = PRECISION_DICT[self.precision]
         self.smooth = smooth
         self.exclude_types = exclude_types
         self.env_protection = env_protection
@@ -312,6 +320,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         # set trainable
         for param in self.parameters():
             param.requires_grad = trainable
+        self.compress = False
 
     def get_rcut(self) -> float:
         """Returns the cut-off radius."""
@@ -325,7 +334,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         """Returns the number of selected atoms in the cut-off radius."""
         return sum(self.sel)
 
-    def get_sel(self) -> List[int]:
+    def get_sel(self) -> list[int]:
         """Returns the number of selected atoms for each type."""
         return self.sel
 
@@ -333,7 +342,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         """Returns the number of element types."""
         return self.ntypes
 
-    def get_type_map(self) -> List[str]:
+    def get_type_map(self) -> list[str]:
         """Get the name to each type of atoms."""
         return self.type_map
 
@@ -349,11 +358,11 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         return self.repformers.dim_emb
 
     def mixed_types(self) -> bool:
-        """If true, the discriptor
+        """If true, the descriptor
         1. assumes total number of atoms aligned across frames;
         2. requires a neighbor list that does not distinguish different atomic types.
 
-        If false, the discriptor
+        If false, the descriptor
         1. assumes total number of atoms of each atom type aligned across frames;
         2. requires a neighbor list that distinguishes different atomic types.
 
@@ -375,11 +384,11 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         # the env_protection of repinit is the same as that of the repformer
         return self.repinit.get_env_protection()
 
-    def share_params(self, base_class, shared_level, resume=False):
+    def share_params(self, base_class, shared_level, resume=False) -> None:
         """
         Share the parameters of self to the base_class with shared_level during multitask training.
         If not start from checkpoint (resume is False),
-        some seperated parameters (e.g. mean and stddev) will be re-calculated across different classes.
+        some separated parameters (e.g. mean and stddev) will be re-calculated across different classes.
         """
         assert (
             self.__class__ == base_class.__class__
@@ -390,33 +399,24 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         if shared_level == 0:
             self._modules["type_embedding"] = base_class._modules["type_embedding"]
             self.repinit.share_params(base_class.repinit, 0, resume=resume)
+            if self.use_three_body:
+                self.repinit_three_body.share_params(
+                    base_class.repinit_three_body, 0, resume=resume
+                )
             self._modules["g1_shape_tranform"] = base_class._modules[
                 "g1_shape_tranform"
             ]
             self.repformers.share_params(base_class.repformers, 0, resume=resume)
         # shared_level: 1
-        # share all parameters in type_embedding and repinit
-        elif shared_level == 1:
-            self._modules["type_embedding"] = base_class._modules["type_embedding"]
-            self.repinit.share_params(base_class.repinit, 0, resume=resume)
-        # shared_level: 2
-        # share all parameters in type_embedding and repformers
-        elif shared_level == 2:
-            self._modules["type_embedding"] = base_class._modules["type_embedding"]
-            self._modules["g1_shape_tranform"] = base_class._modules[
-                "g1_shape_tranform"
-            ]
-            self.repformers.share_params(base_class.repformers, 0, resume=resume)
-        # shared_level: 3
         # share all parameters in type_embedding
-        elif shared_level == 3:
+        elif shared_level == 1:
             self._modules["type_embedding"] = base_class._modules["type_embedding"]
         # Other shared levels
         else:
             raise NotImplementedError
 
     def change_type_map(
-        self, type_map: List[str], model_with_new_type_stat=None
+        self, type_map: list[str], model_with_new_type_stat=None
     ) -> None:
         """Change the type related params to new ones, according to `type_map` and the original one in the model.
         If there are new types in `type_map`, statistics will be updated accordingly to `model_with_new_type_stat` for these new types.
@@ -481,44 +481,55 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
 
     def compute_input_stats(
         self,
-        merged: Union[Callable[[], List[dict]], List[dict]],
+        merged: Union[Callable[[], list[dict]], list[dict]],
         path: Optional[DPPath] = None,
-    ):
+    ) -> None:
         """
         Compute the input statistics (e.g. mean and stddev) for the descriptors from packed data.
 
         Parameters
         ----------
-        merged : Union[Callable[[], List[dict]], List[dict]]
-            - List[dict]: A list of data samples from various data systems.
+        merged : Union[Callable[[], list[dict]], list[dict]]
+            - list[dict]: A list of data samples from various data systems.
                 Each element, `merged[i]`, is a data dictionary containing `keys`: `torch.Tensor`
                 originating from the `i`-th data system.
-            - Callable[[], List[dict]]: A lazy function that returns data samples in the above format
+            - Callable[[], list[dict]]: A lazy function that returns data samples in the above format
                 only when needed. Since the sampling process can be slow and memory-intensive,
                 the lazy function helps by only sampling once.
         path : Optional[DPPath]
             The path to the stat file.
 
         """
-        for ii, descrpt in enumerate([self.repinit, self.repformers]):
+        descrpt_list = [self.repinit, self.repformers]
+        if self.use_three_body:
+            descrpt_list.append(self.repinit_three_body)
+        for ii, descrpt in enumerate(descrpt_list):
             descrpt.compute_input_stats(merged, path)
 
     def set_stat_mean_and_stddev(
         self,
-        mean: List[torch.Tensor],
-        stddev: List[torch.Tensor],
+        mean: list[torch.Tensor],
+        stddev: list[torch.Tensor],
     ) -> None:
         """Update mean and stddev for descriptor."""
-        for ii, descrpt in enumerate([self.repinit, self.repformers]):
+        descrpt_list = [self.repinit, self.repformers]
+        if self.use_three_body:
+            descrpt_list.append(self.repinit_three_body)
+        for ii, descrpt in enumerate(descrpt_list):
             descrpt.mean = mean[ii]
             descrpt.stddev = stddev[ii]
 
-    def get_stat_mean_and_stddev(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    def get_stat_mean_and_stddev(self) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
         """Get mean and stddev for descriptor."""
-        return [self.repinit.mean, self.repformers.mean], [
+        mean_list = [self.repinit.mean, self.repformers.mean]
+        stddev_list = [
             self.repinit.stddev,
             self.repformers.stddev,
         ]
+        if self.use_three_body:
+            mean_list.append(self.repinit_three_body.mean)
+            stddev_list.append(self.repinit_three_body.stddev)
+        return mean_list, stddev_list
 
     def serialize(self) -> dict:
         repinit = self.repinit
@@ -693,7 +704,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         extended_atype: torch.Tensor,
         nlist: torch.Tensor,
         mapping: Optional[torch.Tensor] = None,
-        comm_dict: Optional[Dict[str, torch.Tensor]] = None,
+        comm_dict: Optional[dict[str, torch.Tensor]] = None,
     ):
         """Compute the descriptor.
 
@@ -727,12 +738,15 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
             The smooth switch function. shape: nf x nloc x nnei
 
         """
+        # cast the input to internal precsion
+        extended_coord = extended_coord.to(dtype=self.prec)
+
         use_three_body = self.use_three_body
         nframes, nloc, nnei = nlist.shape
         nall = extended_coord.view(nframes, -1).shape[1] // 3
         # nlists
         nlist_dict = build_multiple_neighbor_list(
-            extended_coord,
+            extended_coord.detach(),
             nlist,
             self.rcut_list,
             self.nsel_list,
@@ -740,6 +754,10 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         # repinit
         g1_ext = self.type_embedding(extended_atype)
         g1_inp = g1_ext[:, :nloc, :]
+        if self.tebd_input_mode in ["strip"]:
+            type_embedding = self.type_embedding.get_full_embedding(g1_ext.device)
+        else:
+            type_embedding = None
         g1, _, _, _, _ = self.repinit(
             nlist_dict[
                 get_multiple_nlist_key(self.repinit.get_rcut(), self.repinit.get_nsel())
@@ -748,6 +766,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
             extended_atype,
             g1_ext,
             mapping,
+            type_embedding,
         )
         if use_three_body:
             assert self.repinit_three_body is not None
@@ -762,6 +781,7 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
                 extended_atype,
                 g1_ext,
                 mapping,
+                type_embedding,
             )
             g1 = torch.cat([g1, g1_three_body], dim=-1)
         # linear to change shape
@@ -788,25 +808,31 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
             extended_atype,
             g1,
             mapping,
-            comm_dict,
+            comm_dict=comm_dict,
         )
         if self.concat_output_tebd:
             g1 = torch.cat([g1, g1_inp], dim=-1)
-        return g1, rot_mat, g2, h2, sw
+        return (
+            g1.to(dtype=env.GLOBAL_PT_FLOAT_PRECISION),
+            rot_mat.to(dtype=env.GLOBAL_PT_FLOAT_PRECISION),
+            g2.to(dtype=env.GLOBAL_PT_FLOAT_PRECISION),
+            h2.to(dtype=env.GLOBAL_PT_FLOAT_PRECISION),
+            sw.to(dtype=env.GLOBAL_PT_FLOAT_PRECISION),
+        )
 
     @classmethod
     def update_sel(
         cls,
         train_data: DeepmdDataSystem,
-        type_map: Optional[List[str]],
+        type_map: Optional[list[str]],
         local_jdata: dict,
-    ) -> Tuple[dict, Optional[float]]:
+    ) -> tuple[dict, Optional[float]]:
         """Update the selection and perform neighbor statistics.
 
         Parameters
         ----------
         train_data : DeepmdDataSystem
-            data used to do neighbor statictics
+            data used to do neighbor statistics
         type_map : list[str], optional
             The name of each type of atoms
         local_jdata : dict
@@ -829,6 +855,14 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
             True,
         )
         local_jdata_cpy["repinit"]["nsel"] = repinit_sel[0]
+        min_nbor_dist, repinit_three_body_sel = update_sel.update_one_sel(
+            train_data,
+            type_map,
+            local_jdata_cpy["repinit"]["three_body_rcut"],
+            local_jdata_cpy["repinit"]["three_body_sel"],
+            True,
+        )
+        local_jdata_cpy["repinit"]["three_body_sel"] = repinit_three_body_sel[0]
         min_nbor_dist, repformer_sel = update_sel.update_one_sel(
             train_data,
             type_map,
@@ -838,3 +872,85 @@ class DescrptDPA2(BaseDescriptor, torch.nn.Module):
         )
         local_jdata_cpy["repformer"]["nsel"] = repformer_sel[0]
         return local_jdata_cpy, min_nbor_dist
+
+    def enable_compression(
+        self,
+        min_nbor_dist: float,
+        table_extrapolate: float = 5,
+        table_stride_1: float = 0.01,
+        table_stride_2: float = 0.1,
+        check_frequency: int = -1,
+    ) -> None:
+        """Receive the statistics (distance, max_nbor_size and env_mat_range) of the training data.
+
+        Parameters
+        ----------
+        min_nbor_dist
+            The nearest distance between atoms
+        table_extrapolate
+            The scale of model extrapolation
+        table_stride_1
+            The uniform stride of the first table
+        table_stride_2
+            The uniform stride of the second table
+        check_frequency
+            The overflow check frequency
+        """
+        # do some checks before the mocel compression process
+        if self.compress:
+            raise ValueError("Compression is already enabled.")
+        assert (
+            not self.repinit.resnet_dt
+        ), "Model compression error: repinit resnet_dt must be false!"
+        for tt in self.repinit.exclude_types:
+            if (tt[0] not in range(self.repinit.ntypes)) or (
+                tt[1] not in range(self.repinit.ntypes)
+            ):
+                raise RuntimeError(
+                    "Repinit exclude types"
+                    + str(tt)
+                    + " must within the number of atomic types "
+                    + str(self.repinit.ntypes)
+                    + "!"
+                )
+        if (
+            self.repinit.ntypes * self.repinit.ntypes - len(self.repinit.exclude_types)
+            == 0
+        ):
+            raise RuntimeError(
+                "Repinit empty embedding-nets are not supported in model compression!"
+            )
+
+        if self.repinit.attn_layer != 0:
+            raise RuntimeError(
+                "Cannot compress model when repinit attention layer is not 0."
+            )
+
+        if self.repinit.tebd_input_mode != "strip":
+            raise RuntimeError(
+                "Cannot compress model when repinit tebd_input_mode == 'concat'"
+            )
+
+        # repinit doesn't have a serialize method
+        data = self.serialize()
+        self.table = DPTabulate(
+            self,
+            data["repinit_args"]["neuron"],
+            data["repinit_args"]["type_one_side"],
+            data["exclude_types"],
+            ActivationFn(data["repinit_args"]["activation_function"]),
+        )
+        self.table_config = [
+            table_extrapolate,
+            table_stride_1,
+            table_stride_2,
+            check_frequency,
+        ]
+        self.lower, self.upper = self.table.build(
+            min_nbor_dist, table_extrapolate, table_stride_1, table_stride_2
+        )
+
+        self.repinit.enable_compression(
+            self.table.data, self.table_config, self.lower, self.upper
+        )
+        self.compress = True

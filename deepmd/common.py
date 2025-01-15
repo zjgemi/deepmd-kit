@@ -14,9 +14,6 @@ from pathlib import (
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
-    List,
-    Set,
     TypeVar,
     Union,
     get_args,
@@ -38,13 +35,13 @@ from deepmd.utils.path import (
 )
 
 __all__ = [
-    "select_idx_map",
-    "make_default_mesh",
-    "j_loader",
+    "VALID_ACTIVATION",
+    "VALID_PRECISION",
     "expand_sys_str",
     "get_np_precision",
-    "VALID_PRECISION",
-    "VALID_ACTIVATION",
+    "j_loader",
+    "make_default_mesh",
+    "select_idx_map",
 ]
 
 _PRECISION = Literal["default", "float16", "float32", "float64"]
@@ -60,18 +57,16 @@ _ACTIVATION = Literal[
     "linear",
 ]
 # get_args is new in py38
-VALID_PRECISION: Set[_PRECISION] = set(get_args(_PRECISION))
-VALID_ACTIVATION: Set[_ACTIVATION] = set(get_args(_ACTIVATION))
+VALID_PRECISION: set[_PRECISION] = set(get_args(_PRECISION))
+VALID_ACTIVATION: set[_ACTIVATION] = set(get_args(_ACTIVATION))
 
 if TYPE_CHECKING:
     _DICT_VAL = TypeVar("_DICT_VAL")
-    __all__.extend(
-        [
-            "_DICT_VAL",
-            "_PRECISION",
-            "_ACTIVATION",
-        ]
-    )
+    __all__ += [
+        "_ACTIVATION",
+        "_DICT_VAL",
+        "_PRECISION",
+    ]
 
 
 def select_idx_map(atom_types: np.ndarray, select_types: np.ndarray) -> np.ndarray:
@@ -80,7 +75,7 @@ def select_idx_map(atom_types: np.ndarray, select_types: np.ndarray) -> np.ndarr
     Parameters
     ----------
     atom_types : np.ndarray
-        array specifing type for each atoms as integer
+        array specifying type for each atoms as integer
     select_types : np.ndarray
         types of atoms you want to find indices for
 
@@ -127,17 +122,17 @@ def make_default_mesh(pbc: bool, mixed_type: bool) -> np.ndarray:
 
 
 def j_deprecated(
-    jdata: Dict[str, "_DICT_VAL"], key: str, deprecated_key: List[str] = []
+    jdata: dict[str, "_DICT_VAL"], key: str, deprecated_key: list[str] = []
 ) -> "_DICT_VAL":
-    """Assert that supplied dictionary conaines specified key.
+    """Assert that supplied dictionary contains specified key.
 
     Parameters
     ----------
-    jdata : Dict[str, _DICT_VAL]
+    jdata : dict[str, _DICT_VAL]
         dictionary to check
     key : str
         key to check
-    deprecated_key : List[str], optional
+    deprecated_key : list[str], optional
         list of deprecated keys, by default []
 
     Returns
@@ -161,7 +156,7 @@ def j_deprecated(
         return jdata[key]
 
 
-def j_loader(filename: Union[str, Path]) -> Dict[str, Any]:
+def j_loader(filename: Union[str, Path]) -> dict[str, Any]:
     """Load yaml or json settings file.
 
     Parameters
@@ -171,7 +166,7 @@ def j_loader(filename: Union[str, Path]) -> Dict[str, Any]:
 
     Returns
     -------
-    Dict[str, Any]
+    dict[str, Any]
         loaded dictionary
 
     Raises
@@ -190,7 +185,7 @@ def j_loader(filename: Union[str, Path]) -> Dict[str, Any]:
         raise TypeError("config file must be json, or yaml/yml")
 
 
-def expand_sys_str(root_dir: Union[str, Path]) -> List[str]:
+def expand_sys_str(root_dir: Union[str, Path]) -> list[str]:
     """Recursively iterate over directories taking those that contain `type.raw` file.
 
     Parameters
@@ -200,7 +195,7 @@ def expand_sys_str(root_dir: Union[str, Path]) -> List[str]:
 
     Returns
     -------
-    List[str]
+    list[str]
         list of string pointing to system directories
     """
     root_dir = DPPath(root_dir)
@@ -221,7 +216,7 @@ def get_np_precision(precision: "_PRECISION") -> np.dtype:
     Returns
     -------
     np.dtype
-        numpy presicion constant
+        numpy precision constant
 
     Raises
     ------
@@ -240,7 +235,7 @@ def get_np_precision(precision: "_PRECISION") -> np.dtype:
         raise RuntimeError(f"{precision} is not a valid precision")
 
 
-def symlink_prefix_files(old_prefix: str, new_prefix: str):
+def symlink_prefix_files(old_prefix: str, new_prefix: str) -> None:
     """Create symlinks from old checkpoint prefix to new one.
 
     On Windows this function will copy files instead of creating symlinks.

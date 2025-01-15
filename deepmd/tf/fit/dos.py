@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 import logging
 from typing import (
-    List,
     Optional,
 )
 
@@ -63,9 +62,9 @@ class DOSFitting(Fitting):
     Parameters
     ----------
     ntypes
-            The ntypes of the descrptor :math:`\mathcal{D}`
+            The ntypes of the descriptor :math:`\mathcal{D}`
     dim_descrpt
-            The dimension of the descrptor :math:`\mathcal{D}`
+            The dimension of the descriptor :math:`\mathcal{D}`
     neuron
             Number of neurons :math:`N` in each hidden layer of the fitting net
     resnet_dt
@@ -75,6 +74,8 @@ class DOSFitting(Fitting):
             Number of frame parameter
     numb_aparam
             Number of atomic parameter
+    dim_case_embd
+            Dimension of case specific embedding.
     ! numb_dos (added)
             Number of gridpoints on which the DOS is evaluated (NEDOS in VASP)
     rcond
@@ -100,7 +101,7 @@ class DOSFitting(Fitting):
     mixed_types : bool
         If true, use a uniform fitting net for all atom types, otherwise use
         different fitting nets for different atom types.
-    type_map: List[str], Optional
+    type_map: list[str], Optional
             A list of strings. Give the name to each type of atoms.
     """
 
@@ -108,21 +109,22 @@ class DOSFitting(Fitting):
         self,
         ntypes: int,
         dim_descrpt: int,
-        neuron: List[int] = [120, 120, 120],
+        neuron: list[int] = [120, 120, 120],
         resnet_dt: bool = True,
         numb_fparam: int = 0,
         numb_aparam: int = 0,
+        dim_case_embd: int = 0,
         numb_dos: int = 300,
         rcond: Optional[float] = None,
-        trainable: Optional[List[bool]] = None,
+        trainable: Optional[list[bool]] = None,
         seed: Optional[int] = None,
         activation_function: str = "tanh",
         precision: str = "default",
         uniform_seed: bool = False,
-        layer_name: Optional[List[Optional[str]]] = None,
+        layer_name: Optional[list[Optional[str]]] = None,
         use_aparam_as_mask: bool = False,
         mixed_types: bool = False,
-        type_map: Optional[List[str]] = None,  # to be compat with input
+        type_map: Optional[list[str]] = None,  # to be compat with input
         **kwargs,
     ) -> None:
         """Constructor."""
@@ -133,6 +135,9 @@ class DOSFitting(Fitting):
 
         self.numb_fparam = numb_fparam
         self.numb_aparam = numb_aparam
+        self.dim_case_embd = dim_case_embd
+        if dim_case_embd > 0:
+            raise ValueError("dim_case_embd is not supported in TensorFlow.")
 
         self.numb_dos = numb_dos
 
@@ -188,7 +193,7 @@ class DOSFitting(Fitting):
 
     # not used
     def compute_output_stats(self, all_stat: dict, mixed_type: bool = False) -> None:
-        """Compute the ouput statistics.
+        """Compute the output statistics.
 
         Parameters
         ----------
@@ -629,7 +634,7 @@ class DOSFitting(Fitting):
             pass
 
     def enable_mixed_precision(self, mixed_prec: Optional[dict] = None) -> None:
-        """Reveive the mixed precision setting.
+        """Receive the mixed precision setting.
 
         Parameters
         ----------
@@ -673,7 +678,7 @@ class DOSFitting(Fitting):
             The deserialized model
         """
         data = data.copy()
-        check_version_compatibility(data.pop("@version", 1), 2, 1)
+        check_version_compatibility(data.pop("@version", 1), 3, 1)
         data["numb_dos"] = data.pop("dim_out")
         fitting = cls(**data)
         fitting.fitting_net_variables = cls.deserialize_network(
@@ -700,7 +705,7 @@ class DOSFitting(Fitting):
         data = {
             "@class": "Fitting",
             "type": "dos",
-            "@version": 2,
+            "@version": 3,
             "var_name": "dos",
             "ntypes": self.ntypes,
             "dim_descrpt": self.dim_descrpt,
@@ -710,6 +715,7 @@ class DOSFitting(Fitting):
             "resnet_dt": self.resnet_dt,
             "numb_fparam": self.numb_fparam,
             "numb_aparam": self.numb_aparam,
+            "dim_case_embd": self.dim_case_embd,
             "rcond": self.rcond,
             "trainable": self.trainable,
             "activation_function": self.activation_function,
@@ -732,13 +738,14 @@ class DOSFitting(Fitting):
                 "fparam_inv_std": self.fparam_inv_std,
                 "aparam_avg": self.aparam_avg,
                 "aparam_inv_std": self.aparam_inv_std,
+                "case_embd": None,
             },
             "type_map": self.type_map,
         }
         return data
 
     @property
-    def input_requirement(self) -> List[DataRequirementItem]:
+    def input_requirement(self) -> list[DataRequirementItem]:
         """Return data requirements needed for the model input."""
         data_requirement = []
         if self.numb_fparam > 0:

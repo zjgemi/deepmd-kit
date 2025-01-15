@@ -13,7 +13,14 @@
 namespace deepmd {
 
 typedef double ENERGYTYPE;
-enum DPBackend { TensorFlow, PyTorch, Paddle, Unknown };
+enum DPBackend { TensorFlow, PyTorch, Paddle, JAX, Unknown };
+
+/**
+ * @brief Get the backend of the model.
+ * @param[in] model The model name.
+ * @return The backend of the model.
+ **/
+DPBackend get_backend(const std::string& model);
 
 struct NeighborListData {
   /// Array stores the core region atom's index
@@ -26,7 +33,13 @@ struct NeighborListData {
   std::vector<int*> firstneigh;
 
  public:
-  void copy_from_nlist(const InputNlist& inlist);
+  /**
+   * @brief Copy the neighbor list from an InputNlist.
+   * @param[in] inlist The input neighbor list.
+   * @param[in] natoms The number of atoms to copy. If natoms is -1, copy all
+   * atoms.
+   */
+  void copy_from_nlist(const InputNlist& inlist, const int natoms = -1);
   void shuffle(const std::vector<int>& fwd_map);
   void shuffle(const deepmd::AtomMap& map);
   void shuffle_exclude_empty(const std::vector<int>& fwd_map);

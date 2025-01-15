@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-"""Module that sets tensorflow working environment and exports inportant constants."""
+"""Module that sets tensorflow working environment and exports important constants."""
 
 import ctypes
+import logging
 import os
 import platform
 from importlib import (
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     )
 
 
-def dlopen_library(module: str, filename: str):
+def dlopen_library(module: str, filename: str) -> None:
     """Dlopen a library from a module.
 
     Parameters
@@ -75,43 +76,53 @@ if platform.system() == "Linux":
     dlopen_library("nvidia.cusparse.lib", "libcusparse.so*")
     dlopen_library("nvidia.cudnn.lib", "libcudnn.so*")
 
+
+FILTER_MSGS = [
+    "is deprecated and will be removed in a future version.",
+    "disable_mixed_precision_graph_rewrite() called when mixed precision is already disabled.",
+]
+
+
+class TFWarningFilter(logging.Filter):
+    def filter(self, record) -> bool:
+        return not any(msg in record.getMessage().strip() for msg in FILTER_MSGS)
+
+
 # keras 3 is incompatible with tf.compat.v1
 # https://keras.io/getting_started/#tensorflow--keras-2-backwards-compatibility
 # 2024/04/24: deepmd.tf doesn't import tf.keras any more
 
-# import tensorflow v1 compatability
-try:
-    import tensorflow.compat.v1 as tf
+# import tensorflow v1 compatibility
+import tensorflow.compat.v1 as tf
 
-    tf.disable_v2_behavior()
-except ImportError:
-    import tensorflow as tf
+tf.get_logger().addFilter(TFWarningFilter())
+tf.disable_v2_behavior()
 try:
     import tensorflow.compat.v2 as tfv2
 except ImportError:
     tfv2 = None
 
 __all__ = [
+    "ATTENTION_LAYER_PATTERN",
+    "EMBEDDING_NET_PATTERN",
+    "FITTING_NET_PATTERN",
     "GLOBAL_CONFIG",
-    "GLOBAL_TF_FLOAT_PRECISION",
-    "GLOBAL_NP_FLOAT_PRECISION",
     "GLOBAL_ENER_FLOAT_PRECISION",
-    "global_float_prec",
-    "global_cvt_2_tf_float",
-    "global_cvt_2_ener_float",
+    "GLOBAL_NP_FLOAT_PRECISION",
+    "GLOBAL_TF_FLOAT_PRECISION",
     "MODEL_VERSION",
     "SHARED_LIB_DIR",
     "SHARED_LIB_MODULE",
-    "default_tf_session_config",
-    "reset_default_tf_session_config",
-    "op_module",
-    "op_grads_module",
-    "TRANSFER_PATTERN",
-    "FITTING_NET_PATTERN",
-    "EMBEDDING_NET_PATTERN",
-    "TYPE_EMBEDDING_PATTERN",
-    "ATTENTION_LAYER_PATTERN",
     "TF_VERSION",
+    "TRANSFER_PATTERN",
+    "TYPE_EMBEDDING_PATTERN",
+    "default_tf_session_config",
+    "global_cvt_2_ener_float",
+    "global_cvt_2_tf_float",
+    "global_float_prec",
+    "op_grads_module",
+    "op_module",
+    "reset_default_tf_session_config",
     "tf_py_version",
 ]
 
@@ -210,7 +221,7 @@ TRANSFER_PATTERN = (
 )
 
 
-def set_mkl():
+def set_mkl() -> None:
     """Tuning MKL for the best performance.
 
     References
@@ -282,7 +293,7 @@ def get_tf_session_config() -> Any:
 default_tf_session_config = get_tf_session_config()
 
 
-def reset_default_tf_session_config(cpu_only: bool):
+def reset_default_tf_session_config(cpu_only: bool) -> None:
     """Limit tensorflow session to CPU or not.
 
     Parameters
@@ -328,7 +339,7 @@ def get_module(module_name: str) -> "ModuleType":
         try:
             module = tf.load_op_library(str(module_file))
         except tf.errors.NotFoundError as e:
-            # check CXX11_ABI_FLAG is compatiblity
+            # check CXX11_ABI_FLAG is compatibility
             # see https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html
             # ABI should be the same
             if "CXX11_ABI_FLAG" in tf.__dict__:
@@ -338,16 +349,11 @@ def get_module(module_name: str) -> "ModuleType":
             if TF_CXX11_ABI_FLAG != tf_cxx11_abi_flag:
                 raise RuntimeError(
                     "This deepmd-kit package was compiled with "
-                    "CXX11_ABI_FLAG=%d, but TensorFlow runtime was compiled "
-                    "with CXX11_ABI_FLAG=%d. These two library ABIs are "
-                    "incompatible and thus an error is raised when loading %s. "
+                    f"CXX11_ABI_FLAG={TF_CXX11_ABI_FLAG}, but TensorFlow runtime was compiled "
+                    f"with CXX11_ABI_FLAG={tf_cxx11_abi_flag}. These two library ABIs are "
+                    f"incompatible and thus an error is raised when loading {module_name}. "
                     "You need to rebuild deepmd-kit against this TensorFlow "
                     "runtime."
-                    % (
-                        TF_CXX11_ABI_FLAG,
-                        tf_cxx11_abi_flag,
-                        module_name,
-                    )
                 ) from e
 
             # different versions may cause incompatibility
@@ -366,7 +372,7 @@ def get_module(module_name: str) -> "ModuleType":
                     "instead."
                 ) from e
             error_message = (
-                "This deepmd-kit package is inconsitent with TensorFlow "
+                "This deepmd-kit package is inconsistent with TensorFlow "
                 f"Runtime, thus an error is raised when loading {module_name}. "
                 "You need to rebuild deepmd-kit against this TensorFlow "
                 "runtime."

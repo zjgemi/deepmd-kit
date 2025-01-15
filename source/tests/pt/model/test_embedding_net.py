@@ -39,6 +39,9 @@ from deepmd.tf.common import (
 )
 from deepmd.tf.descriptor import DescrptSeA as DescrptSeA_tf
 
+from ...seed import (
+    GLOBAL_SEED,
+)
 from ..test_finetune import (
     energy_data_requirement,
 )
@@ -121,7 +124,7 @@ def base_se_a(descriptor, coord, atype, natoms, box):
 
 
 class TestSeA(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         dp_random.seed(0)
         with open(str(Path(__file__).parent / "water/se_e2_a.json")) as fin:
             content = fin.read()
@@ -146,14 +149,14 @@ class TestSeA(unittest.TestCase):
         self.axis_neuron = model_config["descriptor"]["axis_neuron"]
         self.np_batch, self.torch_batch = get_single_batch(ds)
 
-    def test_consistency(self):
+    def test_consistency(self) -> None:
         dp_d = DescrptSeA_tf(
             rcut=self.rcut,
             rcut_smth=self.rcut_smth,
             sel=self.sel,
             neuron=self.filter_neuron,
             axis_neuron=self.axis_neuron,
-            seed=1,
+            seed=GLOBAL_SEED,
         )
         dp_embedding, dp_force, dp_vars = base_se_a(
             descriptor=dp_d,
@@ -164,26 +167,21 @@ class TestSeA(unittest.TestCase):
         )
 
         # Reproduced
-        old_impl = False
         descriptor = DescrptSeA(
             self.rcut,
             self.rcut_smth,
             self.sel,
             neuron=self.filter_neuron,
             axis_neuron=self.axis_neuron,
-            old_impl=old_impl,
         ).to(DEVICE)
         for name, param in descriptor.named_parameters():
-            if old_impl:
-                ms = re.findall(r"(\d)\.deep_layers\.(\d)\.([a-z]+)", name)
-            else:
-                ms = re.findall(r"(\d)\.layers\.(\d)\.([a-z]+)", name)
+            ms = re.findall(r"(\d)\.layers\.(\d)\.([a-z]+)", name)
             if len(ms) == 1:
                 m = ms[0]
                 key = gen_key(worb=m[2], depth=int(m[1]) + 1, elemid=int(m[0]))
                 var = dp_vars[key]
                 with torch.no_grad():
-                    # Keep parameter value consistency between 2 implentations
+                    # Keep parameter value consistency between 2 implementations
                     param.data.copy_(torch.from_numpy(var))
 
         pt_coord = self.torch_batch["coord"].to(env.DEVICE)

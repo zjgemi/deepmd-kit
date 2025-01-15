@@ -16,6 +16,7 @@ Model
    train-energy-spin
    train-fitting-tensor
    train-fitting-dos
+   train-fitting-property
    train-se-e2-a-tebd
    train-se-a-mask
    train-se-e3-tebd
@@ -24,3 +25,4 @@ Model
    linear
    pairtab
    change-bias
+   precision

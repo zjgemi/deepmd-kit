@@ -1,12 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-from copy import (
-    deepcopy,
-)
 from typing import (
-    Dict,
-    List,
     Optional,
-    Tuple,
 )
 
 import torch
@@ -33,31 +27,31 @@ DPZBLModel_ = make_model(DPZBLLinearEnergyAtomicModel)
 
 @BaseModel.register("zbl")
 class DPZBLModel(DPZBLModel_):
-    model_type = "ener"
+    model_type = "zbl"
 
     def __init__(
         self,
         *args,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(*args, **kwargs)
 
     def translated_output_def(self):
         out_def_data = self.model_output_def().get_data()
         output_def = {
-            "atom_energy": deepcopy(out_def_data["energy"]),
-            "energy": deepcopy(out_def_data["energy_redu"]),
+            "atom_energy": out_def_data["energy"],
+            "energy": out_def_data["energy_redu"],
         }
         if self.do_grad_r("energy"):
-            output_def["force"] = deepcopy(out_def_data["energy_derv_r"])
+            output_def["force"] = out_def_data["energy_derv_r"]
             output_def["force"].squeeze(-2)
         if self.do_grad_c("energy"):
-            output_def["virial"] = deepcopy(out_def_data["energy_derv_c_redu"])
+            output_def["virial"] = out_def_data["energy_derv_c_redu"]
             output_def["virial"].squeeze(-2)
-            output_def["atom_virial"] = deepcopy(out_def_data["energy_derv_c"])
+            output_def["atom_virial"] = out_def_data["energy_derv_c"]
             output_def["atom_virial"].squeeze(-3)
         if "mask" in out_def_data:
-            output_def["mask"] = deepcopy(out_def_data["mask"])
+            output_def["mask"] = out_def_data["mask"]
         return output_def
 
     def forward(
@@ -68,7 +62,7 @@ class DPZBLModel(DPZBLModel_):
         fparam: Optional[torch.Tensor] = None,
         aparam: Optional[torch.Tensor] = None,
         do_atomic_virial: bool = False,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         model_ret = self.forward_common(
             coord,
             atype,
@@ -135,15 +129,15 @@ class DPZBLModel(DPZBLModel_):
     def update_sel(
         cls,
         train_data: DeepmdDataSystem,
-        type_map: Optional[List[str]],
+        type_map: Optional[list[str]],
         local_jdata: dict,
-    ) -> Tuple[dict, Optional[float]]:
+    ) -> tuple[dict, Optional[float]]:
         """Update the selection and perform neighbor statistics.
 
         Parameters
         ----------
         train_data : DeepmdDataSystem
-            data used to do neighbor statictics
+            data used to do neighbor statistics
         type_map : list[str], optional
             The name of each type of atoms
         local_jdata : dict

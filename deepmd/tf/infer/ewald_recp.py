@@ -1,7 +1,4 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-from typing import (
-    Tuple,
-)
 
 import numpy as np
 
@@ -19,7 +16,7 @@ from deepmd.tf.utils.sess import (
 class EwaldRecp:
     """Evaluate the reciprocal part of the Ewald sum."""
 
-    def __init__(self, hh, beta):
+    def __init__(self, hh, beta) -> None:
         """Constructor.
 
         Parameters
@@ -54,7 +51,7 @@ class EwaldRecp:
 
     def eval(
         self, coord: np.ndarray, charge: np.ndarray, box: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Evaluate.
 
         Parameters

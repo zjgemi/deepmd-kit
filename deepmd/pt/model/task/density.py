@@ -2,7 +2,6 @@
 import copy
 import logging
 from typing import (
-    List,
     Optional,
     Union,
 )
@@ -42,7 +41,7 @@ class DensityFittingNet(InvarFitting):
         self,
         ntypes: int,
         dim_descrpt: int,
-        neuron: List[int] = [128, 128, 128],
+        neuron: list[int] = [128, 128, 128],
         bias_atom_e: Optional[torch.Tensor] = None,
         resnet_dt: bool = True,
         numb_fparam: int = 0,
@@ -50,8 +49,8 @@ class DensityFittingNet(InvarFitting):
         activation_function: str = "tanh",
         precision: str = DEFAULT_PRECISION,
         mixed_types: bool = True,
-        seed: Optional[Union[int, List[int]]] = None,
-        type_map: Optional[List[str]] = None,
+        seed: Optional[Union[int, list[int]]] = None,
+        type_map: Optional[list[str]] = None,
         **kwargs,
     ):
         super().__init__(
@@ -101,4 +100,4 @@ class DensityFittingNet(InvarFitting):
         }
 
     # make jit happy with torch 2.0.0
-    exclude_types: List[int]
+    exclude_types: list[int]

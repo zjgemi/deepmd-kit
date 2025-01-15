@@ -5,7 +5,6 @@ from pathlib import (
     Path,
 )
 from typing import (
-    List,
     Optional,
 )
 
@@ -63,11 +62,11 @@ class FooFittingA(torch.nn.Module, BaseFitting):
         raise NotImplementedError
 
     def change_type_map(
-        self, type_map: List[str], model_with_new_type_stat=None
+        self, type_map: list[str], model_with_new_type_stat=None
     ) -> None:
         raise NotImplementedError
 
-    def get_type_map(self) -> List[str]:
+    def get_type_map(self) -> list[str]:
         raise NotImplementedError
 
     def forward(
@@ -115,11 +114,11 @@ class FooFittingB(torch.nn.Module, BaseFitting):
         raise NotImplementedError
 
     def change_type_map(
-        self, type_map: List[str], model_with_new_type_stat=None
+        self, type_map: list[str], model_with_new_type_stat=None
     ) -> None:
         raise NotImplementedError
 
-    def get_type_map(self) -> List[str]:
+    def get_type_map(self) -> list[str]:
         raise NotImplementedError
 
     def forward(
@@ -150,10 +149,10 @@ class FooFittingB(torch.nn.Module, BaseFitting):
 
 
 class TestAtomicModelStat(unittest.TestCase, TestCaseSingleFrameWithNlist):
-    def tearDown(self):
+    def tearDown(self) -> None:
         self.tempdir.cleanup()
 
-    def setUp(self):
+    def setUp(self) -> None:
         TestCaseSingleFrameWithNlist.setUp(self)
         nf, nloc, nnei = self.nlist.shape
         self.merged_output_stat = [
@@ -180,7 +179,7 @@ class TestAtomicModelStat(unittest.TestCase, TestCaseSingleFrameWithNlist):
             pass
         self.stat_file_path = DPPath(h5file, "a")
 
-    def test_linear_atomic_model_stat_with_bias(self):
+    def test_linear_atomic_model_stat_with_bias(self) -> None:
         nf, nloc, nnei = self.nlist.shape
         ds = DescrptDPA1(
             self.rcut,

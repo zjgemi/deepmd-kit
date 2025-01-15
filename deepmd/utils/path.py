@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
+import itertools
 import os
 from abc import (
     ABC,
@@ -12,9 +13,8 @@ from pathlib import (
 )
 from typing import (
     ClassVar,
-    Dict,
-    List,
     Optional,
+    Union,
 )
 
 import h5py
@@ -76,7 +76,7 @@ class DPPath(ABC):
         """
 
     @abstractmethod
-    def glob(self, pattern: str) -> List["DPPath"]:
+    def glob(self, pattern: str) -> list["DPPath"]:
         """Search path using the glob pattern.
 
         Parameters
@@ -86,12 +86,12 @@ class DPPath(ABC):
 
         Returns
         -------
-        List[DPPath]
+        list[DPPath]
             list of paths
         """
 
     @abstractmethod
-    def rglob(self, pattern: str) -> List["DPPath"]:
+    def rglob(self, pattern: str) -> list["DPPath"]:
         """This is like calling :meth:`DPPath.glob()` with `**/` added in front
         of the given relative pattern.
 
@@ -102,7 +102,7 @@ class DPPath(ABC):
 
         Returns
         -------
-        List[DPPath]
+        list[DPPath]
             list of paths
         """
 
@@ -113,6 +113,10 @@ class DPPath(ABC):
     @abstractmethod
     def is_dir(self) -> bool:
         """Check if self is directory."""
+
+    @abstractmethod
+    def __getnewargs__(self):
+        """Return the arguments to be passed to __new__ when unpickling an instance."""
 
     @abstractmethod
     def __truediv__(self, key: str) -> "DPPath":
@@ -158,19 +162,19 @@ class DPOSPath(DPPath):
 
     Parameters
     ----------
-    path : str
+    path : Union[str, Path]
         path
     mode : str, optional
         mode, by default "r"
     """
 
-    def __init__(self, path: str, mode: str = "r") -> None:
+    def __init__(self, path: Union[str, Path], mode: str = "r") -> None:
         super().__init__()
         self.mode = mode
-        if isinstance(path, Path):
-            self.path = path
-        else:
-            self.path = Path(path)
+        self.path = Path(path)
+
+    def __getnewargs__(self):
+        return (self.path, self.mode)
 
     def load_numpy(self) -> np.ndarray:
         """Load NumPy array.
@@ -205,7 +209,7 @@ class DPOSPath(DPPath):
         with self.path.open("wb") as f:
             np.save(f, arr)
 
-    def glob(self, pattern: str) -> List["DPPath"]:
+    def glob(self, pattern: str) -> list["DPPath"]:
         """Search path using the glob pattern.
 
         Parameters
@@ -215,13 +219,13 @@ class DPOSPath(DPPath):
 
         Returns
         -------
-        List[DPPath]
+        list[DPPath]
             list of paths
         """
         # currently DPOSPath will only derivative DPOSPath
         return [type(self)(p, mode=self.mode) for p in self.path.glob(pattern)]
 
-    def rglob(self, pattern: str) -> List["DPPath"]:
+    def rglob(self, pattern: str) -> list["DPPath"]:
         """This is like calling :meth:`DPPath.glob()` with `**/` added in front
         of the given relative pattern.
 
@@ -232,7 +236,7 @@ class DPOSPath(DPPath):
 
         Returns
         -------
-        List[DPPath]
+        list[DPPath]
             list of paths
         """
         return [type(self)(p, mode=self.mode) for p in self.path.rglob(pattern)]
@@ -301,9 +305,14 @@ class DPH5Path(DPPath):
         # so we do not support file names containing #...
         s = path.split("#")
         self.root_path = s[0]
+        if not os.path.isfile(self.root_path):
+            raise FileNotFoundError(f"{self.root_path} not found")
         self.root = self._load_h5py(s[0], mode)
         # h5 path: default is the root path
         self._name = s[1] if len(s) > 1 else "/"
+
+    def __getnewargs__(self):
+        return (self.root_path, self.mode)
 
     @classmethod
     @lru_cache(None)
@@ -320,7 +329,7 @@ class DPH5Path(DPPath):
         # this method has cache to avoid duplicated
         # loading from different DPH5Path
         # However the file will be never closed?
-        return h5py.File(path, mode, locking=False)
+        return h5py.File(path, mode)
 
     def load_numpy(self) -> np.ndarray:
         """Load NumPy array.
@@ -359,7 +368,7 @@ class DPH5Path(DPPath):
         self.root.flush()
         self._new_keys.append(self._name)
 
-    def glob(self, pattern: str) -> List["DPPath"]:
+    def glob(self, pattern: str) -> list["DPPath"]:
         """Search path using the glob pattern.
 
         Parameters
@@ -369,17 +378,21 @@ class DPH5Path(DPPath):
 
         Returns
         -------
-        List[DPPath]
+        list[DPPath]
             list of paths
         """
         # got paths starts with current path first, which is faster
-        subpaths = [ii for ii in self._keys if ii.startswith(self._name)]
+        subpaths = [
+            ii
+            for ii in itertools.chain(self._keys, self._new_keys)
+            if ii.startswith(self._name)
+        ]
         return [
             type(self)(f"{self.root_path}#{pp}", mode=self.mode)
             for pp in globfilter(subpaths, self._connect_path(pattern))
         ]
 
-    def rglob(self, pattern: str) -> List["DPPath"]:
+    def rglob(self, pattern: str) -> list["DPPath"]:
         """This is like calling :meth:`DPPath.glob()` with `**/` added in front
         of the given relative pattern.
 
@@ -390,17 +403,17 @@ class DPH5Path(DPPath):
 
         Returns
         -------
-        List[DPPath]
+        list[DPPath]
             list of paths
         """
         return self.glob("**" + pattern)
 
     @property
-    def _keys(self) -> List[str]:
+    def _keys(self) -> list[str]:
         """Walk all groups and dataset."""
         return self._file_keys(self.root)
 
-    __file_new_keys: ClassVar[Dict[h5py.File, List[str]]] = {}
+    __file_new_keys: ClassVar[dict[h5py.File, list[str]]] = {}
 
     @property
     def _new_keys(self):
@@ -410,7 +423,7 @@ class DPH5Path(DPPath):
 
     @classmethod
     @lru_cache(None)
-    def _file_keys(cls, file: h5py.File) -> List[str]:
+    def _file_keys(cls, file: h5py.File) -> list[str]:
         """Walk all groups and dataset."""
         l = []
         file.visit(lambda x: l.append("/" + x))

@@ -21,23 +21,23 @@ if TYPE_CHECKING:
 class DPChecker(BaseChecker):
     name = "deepmd-checker"
     msgs: ClassVar[dict] = {
-        "EDP01": (
+        "E8001": (
             "No explicit device.",
             "no-explicit-device",
             "Require explicit device when initializing a PyTorch tensor.",
         ),
-        "EDP02": (
+        "E8002": (
             "No explicit dtype.",
             "no-explicit-dtype",
             "Require explicit dtype when initializing a NumPy array, a TensorFlow tensor, or a PyTorch tensor.",
         ),
     }
 
-    def visit_call(self, node):
+    def visit_call(self, node) -> None:
         if (
             isinstance(node.func, Attribute)
             and isinstance(node.func.expr, Name)
-            and node.func.expr.name in {"np", "tf", "torch"}
+            and node.func.expr.name in {"np", "tf", "torch", "xp", "jnp"}
             and node.func.attrname
             in {
                 # https://pytorch.org/docs/stable/torch.html#creation-ops
@@ -73,5 +73,5 @@ def register(linter: "PyLinter") -> None:
     pass
 
 
-def load_configuration(linter):
+def load_configuration(linter) -> None:
     linter.register_checker(DPChecker(linter))

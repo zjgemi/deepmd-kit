@@ -2,10 +2,11 @@
 import logging
 import re
 from typing import (
-    List,
     Optional,
     Union,
 )
+
+import numpy as np
 
 from deepmd.dpmodel.utils.network import (
     EmbeddingNet,
@@ -105,7 +106,7 @@ class TypeEmbedNet:
             Whether to use electronic configuration type embedding.
     use_tebd_bias : bool, Optional
             Whether to use bias in the type embedding layer.
-    type_map: List[str], Optional
+    type_map: list[str], Optional
             A list of strings. Give the name to each type of atoms.
     """
 
@@ -113,7 +114,7 @@ class TypeEmbedNet:
         self,
         *,
         ntypes: int,
-        neuron: List[int],
+        neuron: list[int],
         resnet_dt: bool = False,
         activation_function: Union[str, None] = "tanh",
         precision: str = "default",
@@ -123,7 +124,7 @@ class TypeEmbedNet:
         padding: bool = False,
         use_econf_tebd: bool = False,
         use_tebd_bias: bool = False,
-        type_map: Optional[List[str]] = None,
+        type_map: Optional[list[str]] = None,
         **kwargs,
     ) -> None:
         """Constructor."""
@@ -328,6 +329,9 @@ class TypeEmbedNet:
             layer_idx = int(m[1]) - 1
             weight_name = m[0]
             if weight_name == "idt":
+                if not isinstance(value, np.ndarray):
+                    # ignore 0.0 set by deserialize
+                    continue
                 value = value.ravel()
             embedding_net[layer_idx][weight_name] = value
 

@@ -7,7 +7,6 @@ from abc import (
 )
 from typing import (
     Callable,
-    Tuple,
 )
 
 import array_api_compat
@@ -62,11 +61,6 @@ class AutoBatchSize(ABC):
             self.maximum_working_batch_size = initial_batch_size
             if self.is_gpu_available():
                 self.minimal_not_working_batch_size = 2**31
-                log.info(
-                    "If you encounter the error 'an illegal memory access was encountered', this may be due to a TensorFlow issue. "
-                    "To avoid this, set the environment variable DP_INFER_BATCH_SIZE to a smaller value than the last adjusted batch size. "
-                    "The environment variable DP_INFER_BATCH_SIZE controls the inference batch size (nframes * natoms). "
-                )
             else:
                 self.minimal_not_working_batch_size = (
                     self.maximum_working_batch_size + 1
@@ -74,14 +68,14 @@ class AutoBatchSize(ABC):
                 log.warning(
                     "You can use the environment variable DP_INFER_BATCH_SIZE to"
                     "control the inference batch size (nframes * natoms). "
-                    "The default value is %d." % initial_batch_size
+                    f"The default value is {initial_batch_size}."
                 )
 
         self.factor = factor
 
     def execute(
         self, callable: Callable, start_index: int, natoms: int
-    ) -> Tuple[int, tuple]:
+    ) -> tuple[int, tuple]:
         """Excuate a method with given batch size.
 
         Parameters
@@ -143,17 +137,16 @@ class AutoBatchSize(ABC):
                 self._adjust_batch_size(self.factor)
             return n_batch, result
 
-    def _adjust_batch_size(self, factor: float):
+    def _adjust_batch_size(self, factor: float) -> None:
         old_batch_size = self.current_batch_size
         self.current_batch_size = int(self.current_batch_size * factor)
         log.info(
-            "Adjust batch size from %d to %d"
-            % (old_batch_size, self.current_batch_size)
+            f"Adjust batch size from {old_batch_size} to {self.current_batch_size}"
         )
 
     def execute_all(
         self, callable: Callable, total_size: int, natoms: int, *args, **kwargs
-    ) -> Tuple[np.ndarray]:
+    ) -> tuple[np.ndarray]:
         """Excuate a method with all given data.
 
         This method is compatible with Array API.
@@ -161,7 +154,7 @@ class AutoBatchSize(ABC):
         Parameters
         ----------
         callable : Callable
-            The method should accept *args and **kwargs as input and return the similiar array.
+            The method should accept *args and **kwargs as input and return the similar array.
         total_size : int
             Total size
         natoms : int
@@ -174,14 +167,17 @@ class AutoBatchSize(ABC):
 
         def execute_with_batch_size(
             batch_size: int, start_index: int
-        ) -> Tuple[int, Tuple[np.ndarray]]:
+        ) -> tuple[int, tuple[np.ndarray]]:
             end_index = start_index + batch_size
             end_index = min(end_index, total_size)
             return (end_index - start_index), callable(
                 *[
                     (
                         vv[start_index:end_index, ...]
-                        if array_api_compat.is_array_api_obj(vv) and vv.ndim > 1
+                        if (
+                            (array_api_compat.is_array_api_obj(vv) and vv.ndim > 1)
+                            or str(vv.__class__) == "<class 'paddle.Tensor'>"
+                        )
                         else vv
                     )
                     for vv in args
@@ -189,7 +185,10 @@ class AutoBatchSize(ABC):
                 **{
                     kk: (
                         vv[start_index:end_index, ...]
-                        if array_api_compat.is_array_api_obj(vv) and vv.ndim > 1
+                        if (
+                            (array_api_compat.is_array_api_obj(vv) and vv.ndim > 1)
+                            or str(vv.__class__) == "<class 'paddle.Tensor'>"
+                        )
                         else vv
                     )
                     for kk, vv in kwargs.items()
@@ -228,6 +227,14 @@ class AutoBatchSize(ABC):
             if array_api_compat.is_array_api_obj(r[0]):
                 xp = array_api_compat.array_namespace(r[0])
                 ret = xp.concat(r, axis=0)
+            elif str(r[0].__class__) == "<class 'paddle.Tensor'>":
+                try:
+                    import paddle
+                except ModuleNotFoundError as e:
+                    raise ModuleNotFoundError(
+                        "The 'paddlepaddle' is required but not installed."
+                    ) from e
+                ret = paddle.concat(r, axis=0)
             else:
                 raise RuntimeError(f"Unexpected result type {type(r[0])}")
             return ret

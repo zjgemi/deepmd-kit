@@ -6,6 +6,7 @@ from deepmd.pt.model.task import (
     DOSFittingNet,
     EnergyFittingNet,
     PolarFittingNet,
+    PropertyFittingNet,
 )
 
 from ....consistent.common import (
@@ -19,6 +20,7 @@ from ...dpmodel.fitting.test_fitting import (
     FittingParamDos,
     FittingParamEnergy,
     FittingParamPolar,
+    FittingParamProperty,
 )
 from ..backend import (
     PTTestCase,
@@ -31,11 +33,12 @@ from ..backend import (
         (FittingParamDos, DOSFittingNet),
         (FittingParamDipole, DipoleFittingNet),
         (FittingParamPolar, PolarFittingNet),
+        (FittingParamProperty, PropertyFittingNet),
     ),  # class_param & class
     (True, False),  # mixed_types
 )
 class TestFittingPT(unittest.TestCase, FittingTest, PTTestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         ((FittingParam, Fitting), self.mixed_types) = self.param
         FittingTest.setUp(self)
         self.module_class = Fitting

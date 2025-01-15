@@ -10,15 +10,15 @@ from .model_devi import (
 )
 
 __all__ = [
-    "DeepPot",
-    "calc_model_devi",
     "DeepEval",
+    "DeepPot",
     "DeepPotential",
+    "calc_model_devi",
 ]
 
 
 def DeepPotential(*args, **kwargs) -> "DeepEval":
-    """Factory function that forwards to DeepEval (for compatbility).
+    """Factory function that forwards to DeepEval (for compatibility).
 
     Parameters
     ----------

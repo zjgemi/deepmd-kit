@@ -21,13 +21,17 @@ from .ener_model import (
 from .make_model import (
     make_model,
 )
+from .property_model import (
+    PropertyModel,
+)
 from .spin_model import (
     SpinModel,
 )
 
 __all__ = [
-    "EnergyModel",
     "DPModelCommon",
+    "EnergyModel",
+    "PropertyModel",
     "SpinModel",
     "make_model",
 ]

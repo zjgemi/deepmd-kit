@@ -1,19 +1,17 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
+import json
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Dict,
-    List,
     Optional,
-    Tuple,
-    Type,
     Union,
 )
 
 import numpy as np
 import torch
 
+from deepmd.dpmodel.common import PRECISION_DICT as NP_PRECISION_DICT
 from deepmd.dpmodel.output_def import (
     ModelOutputDef,
     OutputVariableCategory,
@@ -36,11 +34,17 @@ from deepmd.infer.deep_polar import (
 from deepmd.infer.deep_pot import (
     DeepPot,
 )
+from deepmd.infer.deep_property import (
+    DeepProperty,
+)
 from deepmd.infer.deep_wfc import (
     DeepWFC,
 )
 from deepmd.pt.model.model import (
     get_model,
+)
+from deepmd.pt.model.network.network import (
+    TypeEmbedNetConsistent,
 )
 from deepmd.pt.train.wrapper import (
     ModelWrapper,
@@ -54,8 +58,10 @@ from deepmd.pt.utils.auto_batch_size import (
 from deepmd.pt.utils.env import (
     DEVICE,
     GLOBAL_PT_FLOAT_PRECISION,
+    RESERVED_PRECISON_DICT,
 )
 from deepmd.pt.utils.utils import (
+    to_numpy_array,
     to_torch_tensor,
 )
 
@@ -64,7 +70,7 @@ if TYPE_CHECKING:
 
 
 class DeepEval(DeepEvalBackend):
-    """PyTorch backend implementaion of DeepEval.
+    """PyTorch backend implementation of DeepEval.
 
     Parameters
     ----------
@@ -91,19 +97,24 @@ class DeepEval(DeepEvalBackend):
         *args: Any,
         auto_batch_size: Union[bool, int, AutoBatchSize] = True,
         neighbor_list: Optional["ase.neighborlist.NewPrimitiveNeighborList"] = None,
-        head: Optional[str] = None,
+        head: Optional[Union[str, int]] = None,
         **kwargs: Any,
-    ):
+    ) -> None:
         self.output_def = output_def
         self.model_path = model_file
         if str(self.model_path).endswith(".pt"):
-            state_dict = torch.load(model_file, map_location=env.DEVICE)
+            state_dict = torch.load(
+                model_file, map_location=env.DEVICE, weights_only=True
+            )
             if "model" in state_dict:
                 state_dict = state_dict["model"]
             self.input_param = state_dict["_extra_state"]["model_params"]
+            self.model_def_script = self.input_param
             self.multi_task = "model_dict" in self.input_param
             if self.multi_task:
                 model_keys = list(self.input_param["model_dict"].keys())
+                if isinstance(head, int):
+                    head = model_keys[0]
                 assert (
                     head is not None
                 ), f"Head must be set for multitask model! Available heads are: {model_keys}"
@@ -125,8 +136,14 @@ class DeepEval(DeepEvalBackend):
         elif str(self.model_path).endswith(".pth"):
             model = torch.jit.load(model_file, map_location=env.DEVICE)
             self.dp = ModelWrapper(model)
+            model_def_script = self.dp.model["Default"].get_model_def_script()
+            if model_def_script:
+                self.model_def_script = json.loads(model_def_script)
+            else:
+                self.model_def_script = {}
         else:
             raise ValueError("Unknown model file format!")
+        self.dp.eval()
         self.rcut = self.dp.model["Default"].get_rcut()
         self.type_map = self.dp.model["Default"].get_type_map()
         if isinstance(auto_batch_size, bool):
@@ -152,7 +169,7 @@ class DeepEval(DeepEvalBackend):
         """Get the number of atom types of this model."""
         return len(self.type_map)
 
-    def get_type_map(self) -> List[str]:
+    def get_type_map(self) -> list[str]:
         """Get the type map (element name of the atom types) of this model."""
         return self.type_map
 
@@ -164,8 +181,20 @@ class DeepEval(DeepEvalBackend):
         """Get the number (dimension) of atomic parameters of this DP."""
         return self.dp.model["Default"].get_dim_aparam()
 
+    def get_intensive(self) -> bool:
+        return self.dp.model["Default"].get_intensive()
+
+    def get_var_name(self) -> str:
+        """Get the name of the property."""
+        if hasattr(self.dp.model["Default"], "get_var_name") and callable(
+            getattr(self.dp.model["Default"], "get_var_name")
+        ):
+            return self.dp.model["Default"].get_var_name()
+        else:
+            raise NotImplementedError
+
     @property
-    def model_type(self) -> Type["DeepEvalWrapper"]:
+    def model_type(self) -> type["DeepEvalWrapper"]:
         """The the evaluator of the model type."""
         model_output_type = self.dp.model["Default"].model_output_type()
         if "energy" in model_output_type:
@@ -180,10 +209,12 @@ class DeepEval(DeepEvalBackend):
             return DeepGlobalPolar
         elif "wfc" in model_output_type:
             return DeepWFC
+        elif self.get_var_name() in model_output_type:
+            return DeepProperty
         else:
             raise RuntimeError("Unknown model type")
 
-    def get_sel_type(self) -> List[int]:
+    def get_sel_type(self) -> list[int]:
         """Get the selected atom types of this model.
 
         Only atoms with selected atom types have atomic contribution
@@ -196,11 +227,15 @@ class DeepEval(DeepEvalBackend):
         """Get the number of DOS."""
         return self.dp.model["Default"].get_numb_dos()
 
-    def get_has_efield(self):
+    def get_task_dim(self) -> int:
+        """Get the output dimension."""
+        return self.dp.model["Default"].get_task_dim()
+
+    def get_has_efield(self) -> bool:
         """Check if the model has efield."""
         return False
 
-    def get_ntypes_spin(self):
+    def get_ntypes_spin(self) -> int:
         """Get the number of spin atom types of this model. Only used in old implement."""
         return 0
 
@@ -217,7 +252,7 @@ class DeepEval(DeepEvalBackend):
         fparam: Optional[np.ndarray] = None,
         aparam: Optional[np.ndarray] = None,
         **kwargs: Any,
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Evaluate the energy, force and virial by using this DP.
 
         Parameters
@@ -263,13 +298,7 @@ class DeepEval(DeepEvalBackend):
             coords, atom_types, len(atom_types.shape) > 1
         )
         request_defs = self._get_request_defs(atomic)
-        if ("spin" not in kwargs or kwargs["spin"] is None) and (
-            "grid" not in kwargs or kwargs["grid"] is None
-        ):
-            out = self._eval_func(self._eval_model, numb_test, natoms)(
-                coords, cells, atom_types, fparam, aparam, request_defs
-            )
-        elif "spin" in kwargs and kwargs["spin"] is not None:
+        if "spin" in kwargs and kwargs["spin"] is not None:
             out = self._eval_func(self._eval_model_spin, numb_test, natoms)(
                 coords,
                 cells,
@@ -279,7 +308,7 @@ class DeepEval(DeepEvalBackend):
                 aparam,
                 request_defs,
             )
-        else:
+        elif "grid" in kwargs and kwargs["grid"] is not None:
             out = self._eval_func(self._eval_model_density, numb_test, natoms)(
                 coords,
                 cells,
@@ -290,6 +319,10 @@ class DeepEval(DeepEvalBackend):
                 request_defs,
             )
             return {"density": out}
+        else:
+            out = self._eval_func(self._eval_model, numb_test, natoms)(
+                coords, cells, atom_types, fparam, aparam, request_defs
+            )
         return dict(
             zip(
                 [x.name for x in request_defs],
@@ -297,7 +330,7 @@ class DeepEval(DeepEvalBackend):
             )
         )
 
-    def _get_request_defs(self, atomic: bool) -> List[OutputVariableDef]:
+    def _get_request_defs(self, atomic: bool) -> list[OutputVariableDef]:
         """Get the requested output definitions.
 
         When atomic is True, all output_def are requested.
@@ -362,7 +395,7 @@ class DeepEval(DeepEvalBackend):
         coords: np.ndarray,
         atom_types: np.ndarray,
         mixed_type: bool = False,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         if mixed_type:
             natoms = len(atom_types[0])
         else:
@@ -381,9 +414,10 @@ class DeepEval(DeepEvalBackend):
         atom_types: np.ndarray,
         fparam: Optional[np.ndarray],
         aparam: Optional[np.ndarray],
-        request_defs: List[OutputVariableDef],
+        request_defs: list[OutputVariableDef],
     ):
         model = self.dp.to(DEVICE)
+        prec = NP_PRECISION_DICT[RESERVED_PRECISON_DICT[GLOBAL_PT_FLOAT_PRECISION]]
 
         nframes = coords.shape[0]
         if len(atom_types.shape) == 1:
@@ -393,14 +427,18 @@ class DeepEval(DeepEvalBackend):
             natoms = len(atom_types[0])
 
         coord_input = torch.tensor(
-            coords.reshape([nframes, natoms, 3]),
+            coords.reshape([nframes, natoms, 3]).astype(prec),
             dtype=GLOBAL_PT_FLOAT_PRECISION,
             device=DEVICE,
         )
-        type_input = torch.tensor(atom_types, dtype=torch.long, device=DEVICE)
+        type_input = torch.tensor(
+            atom_types.astype(NP_PRECISION_DICT[RESERVED_PRECISON_DICT[torch.long]]),
+            dtype=torch.long,
+            device=DEVICE,
+        )
         if cells is not None:
             box_input = torch.tensor(
-                cells.reshape([nframes, 3, 3]),
+                cells.reshape([nframes, 3, 3]).astype(prec),
                 dtype=GLOBAL_PT_FLOAT_PRECISION,
                 device=DEVICE,
             )
@@ -442,7 +480,7 @@ class DeepEval(DeepEvalBackend):
             else:
                 shape = self._get_output_shape(odef, nframes, natoms)
                 results.append(
-                    np.full(np.abs(shape), np.nan)  # pylint: disable=no-explicit-dtype
+                    np.full(np.abs(shape), np.nan, dtype=prec)
                 )  # this is kinda hacky
         return tuple(results)
 
@@ -454,7 +492,7 @@ class DeepEval(DeepEvalBackend):
         spins: np.ndarray,
         fparam: Optional[np.ndarray],
         aparam: Optional[np.ndarray],
-        request_defs: List[OutputVariableDef],
+        request_defs: list[OutputVariableDef],
     ):
         model = self.dp.to(DEVICE)
 
@@ -522,7 +560,13 @@ class DeepEval(DeepEvalBackend):
             else:
                 shape = self._get_output_shape(odef, nframes, natoms)
                 results.append(
-                    np.full(np.abs(shape), np.nan)  # pylint: disable=no-explicit-dtype
+                    np.full(
+                        np.abs(shape),
+                        np.nan,
+                        dtype=NP_PRECISION_DICT[
+                            RESERVED_PRECISON_DICT[GLOBAL_PT_FLOAT_PRECISION]
+                        ],
+                    )
                 )  # this is kinda hacky
         return tuple(results)
 
@@ -534,7 +578,7 @@ class DeepEval(DeepEvalBackend):
         grid: np.ndarray,
         fparam: Optional[np.ndarray],
         aparam: Optional[np.ndarray],
-        request_defs: List[OutputVariableDef],
+        request_defs: list[OutputVariableDef],
     ):
         model = self.dp.to(DEVICE)
 
@@ -632,229 +676,91 @@ class DeepEval(DeepEvalBackend):
         else:
             raise RuntimeError("unknown category")
 
+    def eval_typeebd(self) -> np.ndarray:
+        """Evaluate output of type embedding network by using this model.
 
-# For tests only
-def eval_model(
-    model,
-    coords: Union[np.ndarray, torch.Tensor],
-    cells: Optional[Union[np.ndarray, torch.Tensor]],
-    atom_types: Union[np.ndarray, torch.Tensor, List[int]],
-    spins: Optional[Union[np.ndarray, torch.Tensor]] = None,
-    atomic: bool = False,
-    infer_batch_size: int = 2,
-    denoise: bool = False,
-):
-    model = model.to(DEVICE)
-    energy_out = []
-    atomic_energy_out = []
-    force_out = []
-    force_mag_out = []
-    virial_out = []
-    atomic_virial_out = []
-    updated_coord_out = []
-    logits_out = []
-    err_msg = (
-        f"All inputs should be the same format, "
-        f"but found {type(coords)}, {type(cells)}, {type(atom_types)} instead! "
-    )
-    return_tensor = True
-    if isinstance(coords, torch.Tensor):
-        if cells is not None:
-            assert isinstance(cells, torch.Tensor), err_msg
-        if spins is not None:
-            assert isinstance(spins, torch.Tensor), err_msg
-        assert isinstance(atom_types, torch.Tensor) or isinstance(atom_types, list)
-        atom_types = torch.tensor(atom_types, dtype=torch.long, device=DEVICE)
-    elif isinstance(coords, np.ndarray):
-        if cells is not None:
-            assert isinstance(cells, np.ndarray), err_msg
-        if spins is not None:
-            assert isinstance(spins, np.ndarray), err_msg
-        assert isinstance(atom_types, np.ndarray) or isinstance(atom_types, list)
-        atom_types = np.array(atom_types, dtype=np.int32)
-        return_tensor = False
+        Returns
+        -------
+        np.ndarray
+            The output of type embedding network. The shape is [ntypes, o_size] or [ntypes + 1, o_size],
+            where ntypes is the number of types, and o_size is the number of nodes
+            in the output layer. If there are multiple type embedding networks,
+            these outputs will be concatenated along the second axis.
 
-    nframes = coords.shape[0]
-    if len(atom_types.shape) == 1:
-        natoms = len(atom_types)
-        if isinstance(atom_types, torch.Tensor):
-            atom_types = torch.tile(atom_types.unsqueeze(0), [nframes, 1]).reshape(
-                nframes, -1
-            )
-        else:
-            atom_types = np.tile(atom_types, nframes).reshape(nframes, -1)
-    else:
-        natoms = len(atom_types[0])
+        Raises
+        ------
+        KeyError
+            If the model does not enable type embedding.
 
-    coord_input = torch.tensor(
-        coords.reshape([-1, natoms, 3]), dtype=GLOBAL_PT_FLOAT_PRECISION, device=DEVICE
-    )
-    spin_input = None
-    if spins is not None:
-        spin_input = torch.tensor(
-            spins.reshape([-1, natoms, 3]),
-            dtype=GLOBAL_PT_FLOAT_PRECISION,
-            device=DEVICE,
-        )
-    has_spin = getattr(model, "has_spin", False)
-    if callable(has_spin):
-        has_spin = has_spin()
-    type_input = torch.tensor(atom_types, dtype=torch.long, device=DEVICE)
-    box_input = None
-    if cells is None:
-        pbc = False
-    else:
-        pbc = True
-        box_input = torch.tensor(
-            cells.reshape([-1, 3, 3]), dtype=GLOBAL_PT_FLOAT_PRECISION, device=DEVICE
-        )
-    num_iter = int((nframes + infer_batch_size - 1) / infer_batch_size)
+        See Also
+        --------
+        deepmd.pt.model.network.network.TypeEmbedNetConsistent :
+            The type embedding network.
+        """
+        out = []
+        for mm in self.dp.model["Default"].modules():
+            if mm.original_name == TypeEmbedNetConsistent.__name__:
+                out.append(mm(DEVICE))
+        if not out:
+            raise KeyError("The model has no type embedding networks.")
+        typeebd = torch.cat(out, dim=1)
+        return to_numpy_array(typeebd)
 
-    for ii in range(num_iter):
-        batch_coord = coord_input[ii * infer_batch_size : (ii + 1) * infer_batch_size]
-        batch_atype = type_input[ii * infer_batch_size : (ii + 1) * infer_batch_size]
-        batch_box = None
-        batch_spin = None
-        if spin_input is not None:
-            batch_spin = spin_input[ii * infer_batch_size : (ii + 1) * infer_batch_size]
-        if pbc:
-            batch_box = box_input[ii * infer_batch_size : (ii + 1) * infer_batch_size]
-        input_dict = {
-            "coord": batch_coord,
-            "atype": batch_atype,
-            "box": batch_box,
-            "do_atomic_virial": atomic,
-        }
-        if has_spin:
-            input_dict["spin"] = batch_spin
-        batch_output = model(**input_dict)
-        if isinstance(batch_output, tuple):
-            batch_output = batch_output[0]
-        if not return_tensor:
-            if "energy" in batch_output:
-                energy_out.append(batch_output["energy"].detach().cpu().numpy())
-            if "atom_energy" in batch_output:
-                atomic_energy_out.append(
-                    batch_output["atom_energy"].detach().cpu().numpy()
-                )
-            if "force" in batch_output:
-                force_out.append(batch_output["force"].detach().cpu().numpy())
-            if "force_mag" in batch_output:
-                force_mag_out.append(batch_output["force_mag"].detach().cpu().numpy())
-            if "virial" in batch_output:
-                virial_out.append(batch_output["virial"].detach().cpu().numpy())
-            if "atom_virial" in batch_output:
-                atomic_virial_out.append(
-                    batch_output["atom_virial"].detach().cpu().numpy()
-                )
-            if "updated_coord" in batch_output:
-                updated_coord_out.append(
-                    batch_output["updated_coord"].detach().cpu().numpy()
-                )
-            if "logits" in batch_output:
-                logits_out.append(batch_output["logits"].detach().cpu().numpy())
-        else:
-            if "energy" in batch_output:
-                energy_out.append(batch_output["energy"])
-            if "atom_energy" in batch_output:
-                atomic_energy_out.append(batch_output["atom_energy"])
-            if "force" in batch_output:
-                force_out.append(batch_output["force"])
-            if "force_mag" in batch_output:
-                force_mag_out.append(batch_output["force_mag"])
-            if "virial" in batch_output:
-                virial_out.append(batch_output["virial"])
-            if "atom_virial" in batch_output:
-                atomic_virial_out.append(batch_output["atom_virial"])
-            if "updated_coord" in batch_output:
-                updated_coord_out.append(batch_output["updated_coord"])
-            if "logits" in batch_output:
-                logits_out.append(batch_output["logits"])
-    if not return_tensor:
-        energy_out = (
-            np.concatenate(energy_out) if energy_out else np.zeros([nframes, 1])  # pylint: disable=no-explicit-dtype
+    def get_model_def_script(self) -> str:
+        """Get model definition script."""
+        return self.model_def_script
+
+    def eval_descriptor(
+        self,
+        coords: np.ndarray,
+        cells: Optional[np.ndarray],
+        atom_types: np.ndarray,
+        fparam: Optional[np.ndarray] = None,
+        aparam: Optional[np.ndarray] = None,
+        **kwargs: Any,
+    ) -> np.ndarray:
+        """Evaluate descriptors by using this DP.
+
+        Parameters
+        ----------
+        coords
+            The coordinates of atoms.
+            The array should be of size nframes x natoms x 3
+        cells
+            The cell of the region.
+            If None then non-PBC is assumed, otherwise using PBC.
+            The array should be of size nframes x 9
+        atom_types
+            The atom types
+            The list should contain natoms ints
+        fparam
+            The frame parameter.
+            The array can be of size :
+            - nframes x dim_fparam.
+            - dim_fparam. Then all frames are assumed to be provided with the same fparam.
+        aparam
+            The atomic parameter
+            The array can be of size :
+            - nframes x natoms x dim_aparam.
+            - natoms x dim_aparam. Then all frames are assumed to be provided with the same aparam.
+            - dim_aparam. Then all frames and atoms are provided with the same aparam.
+
+        Returns
+        -------
+        descriptor
+            Descriptors.
+        """
+        model = self.dp.model["Default"]
+        model.set_eval_descriptor_hook(True)
+        self.eval(
+            coords,
+            cells,
+            atom_types,
+            atomic=False,
+            fparam=fparam,
+            aparam=aparam,
+            **kwargs,
         )
-        atomic_energy_out = (
-            np.concatenate(atomic_energy_out)
-            if atomic_energy_out
-            else np.zeros([nframes, natoms, 1])  # pylint: disable=no-explicit-dtype
-        )
-        force_out = (
-            np.concatenate(force_out) if force_out else np.zeros([nframes, natoms, 3])  # pylint: disable=no-explicit-dtype
-        )
-        force_mag_out = (
-            np.concatenate(force_mag_out)
-            if force_mag_out
-            else np.zeros([nframes, natoms, 3])  # pylint: disable=no-explicit-dtype
-        )
-        virial_out = (
-            np.concatenate(virial_out) if virial_out else np.zeros([nframes, 3, 3])  # pylint: disable=no-explicit-dtype
-        )
-        atomic_virial_out = (
-            np.concatenate(atomic_virial_out)
-            if atomic_virial_out
-            else np.zeros([nframes, natoms, 3, 3])  # pylint: disable=no-explicit-dtype
-        )
-        updated_coord_out = (
-            np.concatenate(updated_coord_out) if updated_coord_out else None
-        )
-        logits_out = np.concatenate(logits_out) if logits_out else None
-    else:
-        energy_out = (
-            torch.cat(energy_out)
-            if energy_out
-            else torch.zeros(
-                [nframes, 1], dtype=GLOBAL_PT_FLOAT_PRECISION, device=DEVICE
-            )
-        )
-        atomic_energy_out = (
-            torch.cat(atomic_energy_out)
-            if atomic_energy_out
-            else torch.zeros(
-                [nframes, natoms, 1], dtype=GLOBAL_PT_FLOAT_PRECISION, device=DEVICE
-            )
-        )
-        force_out = (
-            torch.cat(force_out)
-            if force_out
-            else torch.zeros(
-                [nframes, natoms, 3], dtype=GLOBAL_PT_FLOAT_PRECISION, device=DEVICE
-            )
-        )
-        force_mag_out = (
-            torch.cat(force_mag_out)
-            if force_mag_out
-            else torch.zeros(
-                [nframes, natoms, 3], dtype=GLOBAL_PT_FLOAT_PRECISION, device=DEVICE
-            )
-        )
-        virial_out = (
-            torch.cat(virial_out)
-            if virial_out
-            else torch.zeros(
-                [nframes, 3, 3], dtype=GLOBAL_PT_FLOAT_PRECISION, device=DEVICE
-            )
-        )
-        atomic_virial_out = (
-            torch.cat(atomic_virial_out)
-            if atomic_virial_out
-            else torch.zeros(
-                [nframes, natoms, 3, 3], dtype=GLOBAL_PT_FLOAT_PRECISION, device=DEVICE
-            )
-        )
-        updated_coord_out = torch.cat(updated_coord_out) if updated_coord_out else None
-        logits_out = torch.cat(logits_out) if logits_out else None
-    if denoise:
-        return updated_coord_out, logits_out
-    else:
-        results_dict = {
-            "energy": energy_out,
-            "force": force_out,
-            "virial": virial_out,
-        }
-        if has_spin:
-            results_dict["force_mag"] = force_mag_out
-        if atomic:
-            results_dict["atom_energy"] = atomic_energy_out
-            results_dict["atom_virial"] = atomic_virial_out
-        return results_dict
+        descriptor = model.eval_descriptor()
+        model.set_eval_descriptor_hook(False)
+        return to_numpy_array(descriptor)

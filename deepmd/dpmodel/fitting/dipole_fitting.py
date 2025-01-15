@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-import copy
 from typing import (
     Any,
-    Dict,
-    List,
     Optional,
     Union,
 )
 
+import array_api_compat
 import numpy as np
 
 from deepmd.dpmodel import (
     DEFAULT_PRECISION,
+)
+from deepmd.dpmodel.common import (
+    cast_precision,
 )
 from deepmd.dpmodel.fitting.base_fitting import (
     BaseFitting,
@@ -81,7 +82,7 @@ class DipoleFitting(GeneralFitting):
     c_differentiable
             If the variable is differentiated with respect to the cell tensor (pbc case).
             Only reducible variable are differentiable.
-    type_map: List[str], Optional
+    type_map: list[str], Optional
             A list of strings. Give the name to each type of atoms.
     """
 
@@ -90,26 +91,26 @@ class DipoleFitting(GeneralFitting):
         ntypes: int,
         dim_descrpt: int,
         embedding_width: int,
-        neuron: List[int] = [120, 120, 120],
+        neuron: list[int] = [120, 120, 120],
         resnet_dt: bool = True,
         numb_fparam: int = 0,
         numb_aparam: int = 0,
+        dim_case_embd: int = 0,
         rcond: Optional[float] = None,
         tot_ener_zero: bool = False,
-        trainable: Optional[List[bool]] = None,
+        trainable: Optional[list[bool]] = None,
         activation_function: str = "tanh",
         precision: str = DEFAULT_PRECISION,
-        layer_name: Optional[List[Optional[str]]] = None,
+        layer_name: Optional[list[Optional[str]]] = None,
         use_aparam_as_mask: bool = False,
         spin: Any = None,
         mixed_types: bool = False,
-        exclude_types: List[int] = [],
+        exclude_types: list[int] = [],
         r_differentiable: bool = True,
         c_differentiable: bool = True,
-        type_map: Optional[List[str]] = None,
-        old_impl=False,
-        seed: Optional[Union[int, List[int]]] = None,
-    ):
+        type_map: Optional[list[str]] = None,
+        seed: Optional[Union[int, list[int]]] = None,
+    ) -> None:
         if tot_ener_zero:
             raise NotImplementedError("tot_ener_zero is not implemented")
         if spin is not None:
@@ -130,6 +131,7 @@ class DipoleFitting(GeneralFitting):
             resnet_dt=resnet_dt,
             numb_fparam=numb_fparam,
             numb_aparam=numb_aparam,
+            dim_case_embd=dim_case_embd,
             rcond=rcond,
             tot_ener_zero=tot_ener_zero,
             trainable=trainable,
@@ -143,7 +145,6 @@ class DipoleFitting(GeneralFitting):
             type_map=type_map,
             seed=seed,
         )
-        self.old_impl = False
 
     def _net_out_dim(self):
         """Set the FittingNet output dim."""
@@ -153,15 +154,14 @@ class DipoleFitting(GeneralFitting):
         data = super().serialize()
         data["type"] = "dipole"
         data["embedding_width"] = self.embedding_width
-        data["old_impl"] = self.old_impl
         data["r_differentiable"] = self.r_differentiable
         data["c_differentiable"] = self.c_differentiable
         return data
 
     @classmethod
     def deserialize(cls, data: dict) -> "GeneralFitting":
-        data = copy.deepcopy(data)
-        check_version_compatibility(data.pop("@version", 1), 2, 1)
+        data = data.copy()
+        check_version_compatibility(data.pop("@version", 1), 3, 1)
         var_name = data.pop("var_name", None)
         assert var_name == "dipole"
         return super().deserialize(data)
@@ -179,6 +179,7 @@ class DipoleFitting(GeneralFitting):
             ]
         )
 
+    @cast_precision
     def call(
         self,
         descriptor: np.ndarray,
@@ -188,7 +189,7 @@ class DipoleFitting(GeneralFitting):
         h2: Optional[np.ndarray] = None,
         fparam: Optional[np.ndarray] = None,
         aparam: Optional[np.ndarray] = None,
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Calculate the fitting.
 
         Parameters
@@ -212,6 +213,7 @@ class DipoleFitting(GeneralFitting):
             The atomic parameter. shape: nf x nloc x nap. nap being `numb_aparam`
 
         """
+        xp = array_api_compat.array_namespace(descriptor, atype)
         nframes, nloc, _ = descriptor.shape
         assert gr is not None, "Must provide the rotation matrix for dipole fitting."
         # (nframes, nloc, m1)
@@ -219,9 +221,11 @@ class DipoleFitting(GeneralFitting):
             self.var_name
         ]
         # (nframes * nloc, 1, m1)
-        out = out.reshape(-1, 1, self.embedding_width)
+        out = xp.reshape(out, (-1, 1, self.embedding_width))
         # (nframes * nloc, m1, 3)
-        gr = gr.reshape(nframes * nloc, -1, 3)
+        gr = xp.reshape(gr, (nframes * nloc, -1, 3))
         # (nframes, nloc, 3)
-        out = np.einsum("bim,bmj->bij", out, gr).squeeze(-2).reshape(nframes, nloc, 3)
+        # out = np.einsum("bim,bmj->bij", out, gr).squeeze(-2).reshape(nframes, nloc, 3)
+        out = out @ gr
+        out = xp.reshape(out, (nframes, nloc, 3))
         return {self.var_name: out}

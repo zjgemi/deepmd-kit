@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 from typing import (
     Optional,
-    Union,
 )
 
 import array_api_compat
@@ -12,10 +11,11 @@ from deepmd.dpmodel import (
 )
 from deepmd.dpmodel.array_api import (
     support_array_api,
+    xp_take_along_axis,
 )
 
 
-@support_array_api(version="2022.12")
+@support_array_api(version="2023.12")
 def compute_smooth_weight(
     distance: np.ndarray,
     rmin: float,
@@ -25,14 +25,11 @@ def compute_smooth_weight(
     if rmin >= rmax:
         raise ValueError("rmin should be less than rmax.")
     xp = array_api_compat.array_namespace(distance)
-    min_mask = distance <= rmin
-    max_mask = distance >= rmax
-    mid_mask = xp.logical_not(xp.logical_or(min_mask, max_mask))
+    distance = xp.clip(distance, min=rmin, max=rmax)
     uu = (distance - rmin) / (rmax - rmin)
-    vv = uu * uu * uu * (-6.0 * uu * uu + 15.0 * uu - 10.0) + 1.0
-    return vv * xp.astype(mid_mask, distance.dtype) + xp.astype(
-        min_mask, distance.dtype
-    )
+    uu2 = uu * uu
+    vv = uu2 * uu * (-6.0 * uu2 + 15.0 * uu - 10.0) + 1.0
+    return vv
 
 
 def _make_env_mat(
@@ -44,33 +41,36 @@ def _make_env_mat(
     protection: float = 0.0,
 ):
     """Make smooth environment matrix."""
+    xp = array_api_compat.array_namespace(nlist)
     nf, nloc, nnei = nlist.shape
     # nf x nall x 3
-    coord = coord.reshape(nf, -1, 3)
+    coord = xp.reshape(coord, (nf, -1, 3))
     mask = nlist >= 0
-    nlist = nlist * mask
+    nlist = nlist * xp.astype(mask, nlist.dtype)
     # nf x (nloc x nnei) x 3
-    index = np.tile(nlist.reshape(nf, -1, 1), (1, 1, 3))
-    coord_r = np.take_along_axis(coord, index, 1)
+    index = xp.tile(xp.reshape(nlist, (nf, -1, 1)), (1, 1, 3))
+    coord_r = xp_take_along_axis(coord, index, 1)
     # nf x nloc x nnei x 3
-    coord_r = coord_r.reshape(nf, nloc, nnei, 3)
+    coord_r = xp.reshape(coord_r, (nf, nloc, nnei, 3))
     # nf x nloc x 1 x 3
-    coord_l = coord[:, :nloc].reshape(nf, -1, 1, 3)
+    coord_l = xp.reshape(coord[:, :nloc, ...], (nf, -1, 1, 3))
     # nf x nloc x nnei x 3
     diff = coord_r - coord_l
     # nf x nloc x nnei
-    length = np.linalg.norm(diff, axis=-1, keepdims=True)
+    # the grad of JAX vector_norm is NaN at x=0
+    diff_ = xp.where(xp.abs(diff) < 1e-30, xp.full_like(diff, 1e-30), diff)
+    length = xp.linalg.vector_norm(diff_, axis=-1, keepdims=True)
     # for index 0 nloc atom
-    length = length + ~np.expand_dims(mask, -1)
+    length = length + xp.astype(~xp.expand_dims(mask, axis=-1), length.dtype)
     t0 = 1 / (length + protection)
     t1 = diff / (length + protection) ** 2
     weight = compute_smooth_weight(length, ruct_smth, rcut)
-    weight = weight * np.expand_dims(mask, -1)
+    weight = weight * xp.astype(xp.expand_dims(mask, axis=-1), weight.dtype)
     if radial_only:
         env_mat = t0 * weight
     else:
-        env_mat = np.concatenate([t0, t1], axis=-1) * weight
-    return env_mat, diff * np.expand_dims(mask, -1), weight
+        env_mat = xp.concat([t0, t1], axis=-1) * weight
+    return env_mat, diff * xp.astype(xp.expand_dims(mask, axis=-1), diff.dtype), weight
 
 
 class EnvMat(NativeOP):
@@ -79,7 +79,7 @@ class EnvMat(NativeOP):
         rcut,
         rcut_smth,
         protection: float = 0.0,
-    ):
+    ) -> None:
         self.rcut = rcut
         self.rcut_smth = rcut_smth
         self.protection = protection
@@ -92,7 +92,7 @@ class EnvMat(NativeOP):
         davg: Optional[np.ndarray] = None,
         dstd: Optional[np.ndarray] = None,
         radial_only: bool = False,
-    ) -> Union[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Compute the environment matrix.
 
         Parameters
@@ -122,13 +122,14 @@ class EnvMat(NativeOP):
         switch
             The value of switch function. shape: nf x nloc x nnei
         """
+        xp = array_api_compat.array_namespace(coord_ext, atype_ext, nlist)
         em, diff, sw = self._call(nlist, coord_ext, radial_only)
         nf, nloc, nnei = nlist.shape
         atype = atype_ext[:, :nloc]
         if davg is not None:
-            em -= davg[atype]
+            em -= xp.reshape(xp.take(davg, xp.reshape(atype, (-1,)), axis=0), em.shape)
         if dstd is not None:
-            em /= dstd[atype]
+            em /= xp.reshape(xp.take(dstd, xp.reshape(atype, (-1,)), axis=0), em.shape)
         return em, diff, sw
 
     def _call(self, nlist, coord_ext, radial_only):

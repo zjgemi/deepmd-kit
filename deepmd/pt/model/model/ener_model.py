@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-from copy import (
-    deepcopy,
-)
 from typing import (
-    Dict,
     Optional,
 )
 
@@ -34,26 +30,26 @@ class EnergyModel(DPModelCommon, DPEnergyModel_):
         self,
         *args,
         **kwargs,
-    ):
+    ) -> None:
         DPModelCommon.__init__(self)
         DPEnergyModel_.__init__(self, *args, **kwargs)
 
     def translated_output_def(self):
         out_def_data = self.model_output_def().get_data()
         output_def = {
-            "atom_energy": deepcopy(out_def_data["energy"]),
-            "energy": deepcopy(out_def_data["energy_redu"]),
+            "atom_energy": out_def_data["energy"],
+            "energy": out_def_data["energy_redu"],
         }
         if self.do_grad_r("energy"):
-            output_def["force"] = deepcopy(out_def_data["energy_derv_r"])
+            output_def["force"] = out_def_data["energy_derv_r"]
             output_def["force"].squeeze(-2)
         if self.do_grad_c("energy"):
-            output_def["virial"] = deepcopy(out_def_data["energy_derv_c_redu"])
+            output_def["virial"] = out_def_data["energy_derv_c_redu"]
             output_def["virial"].squeeze(-2)
-            output_def["atom_virial"] = deepcopy(out_def_data["energy_derv_c"])
+            output_def["atom_virial"] = out_def_data["energy_derv_c"]
             output_def["atom_virial"].squeeze(-3)
         if "mask" in out_def_data:
-            output_def["mask"] = deepcopy(out_def_data["mask"])
+            output_def["mask"] = out_def_data["mask"]
         return output_def
 
     def forward(
@@ -64,7 +60,7 @@ class EnergyModel(DPModelCommon, DPEnergyModel_):
         fparam: Optional[torch.Tensor] = None,
         aparam: Optional[torch.Tensor] = None,
         do_atomic_virial: bool = False,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         model_ret = self.forward_common(
             coord,
             atype,
@@ -104,7 +100,7 @@ class EnergyModel(DPModelCommon, DPEnergyModel_):
         fparam: Optional[torch.Tensor] = None,
         aparam: Optional[torch.Tensor] = None,
         do_atomic_virial: bool = False,
-        comm_dict: Optional[Dict[str, torch.Tensor]] = None,
+        comm_dict: Optional[dict[str, torch.Tensor]] = None,
     ):
         model_ret = self.forward_common_lower(
             extended_coord,

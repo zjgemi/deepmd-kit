@@ -22,7 +22,7 @@ class AutoBatchSize(AutoBatchSizeBase):
         self,
         initial_batch_size: int = 1024,
         factor: float = 2.0,
-    ):
+    ) -> None:
         super().__init__(
             initial_batch_size=initial_batch_size,
             factor=factor,
@@ -53,6 +53,7 @@ class AutoBatchSize(AutoBatchSizeBase):
             "CUDA out of memory." in e.args[0]
             or "CUDA driver error: out of memory" in e.args[0]
             or "cusolver error: CUSOLVER_STATUS_INTERNAL_ERROR" in e.args[0]
+            or "CUDA error: CUBLAS_STATUS_INTERNAL_ERROR" in e.args[0]
         ):
             # Release all unoccupied cached memory
             torch.cuda.empty_cache()

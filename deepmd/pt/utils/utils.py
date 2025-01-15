@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 from typing import (
-    List,
     Optional,
     Union,
     overload,
@@ -20,7 +19,7 @@ from .env import PRECISION_DICT as PT_PRECISION_DICT
 
 
 class ActivationFn(torch.nn.Module):
-    def __init__(self, activation: Optional[str]):
+    def __init__(self, activation: Optional[str]) -> None:
         super().__init__()
         self.activation: str = activation if activation is not None else "linear"
 
@@ -40,6 +39,8 @@ class ActivationFn(torch.nn.Module):
             return F.softplus(x)
         elif self.activation.lower() == "sigmoid":
             return torch.sigmoid(x)
+        elif self.activation.lower() == "silu":
+            return F.silu(x)
         elif self.activation.lower() == "linear" or self.activation.lower() == "none":
             return x
         else:
@@ -102,7 +103,7 @@ def to_torch_tensor(
     return torch.tensor(xx, dtype=prec, device=DEVICE)
 
 
-def dict_to_device(sample_dict):
+def dict_to_device(sample_dict) -> None:
     for key in sample_dict:
         if isinstance(sample_dict[key], list):
             sample_dict[key] = [item.to(DEVICE) for item in sample_dict[key]]
@@ -123,7 +124,7 @@ MIX_MULT_R = 0x4973F715
 XSHIFT = 16
 
 
-def hashmix(value: int, hash_const: List[int]):
+def hashmix(value: int, hash_const: list[int]):
     value ^= INIT_A
     hash_const[0] *= MULT_A
     value *= INIT_A
@@ -142,7 +143,7 @@ def mix(x: int, y: int):
     return result
 
 
-def mix_entropy(entropy_array: List[int]) -> int:
+def mix_entropy(entropy_array: list[int]) -> int:
     # https://github.com/numpy/numpy/blob/a4cddb60489f821a1a4dffc16cd5c69755d43bdb/numpy/random/bit_generator.pyx#L341-L374
     hash_const = [INIT_A]
     mixer = hashmix(entropy_array[0], hash_const)
@@ -152,7 +153,7 @@ def mix_entropy(entropy_array: List[int]) -> int:
 
 
 def get_generator(
-    seed: Optional[Union[int, List[int]]] = None,
+    seed: Optional[Union[int, list[int]]] = None,
 ) -> Optional[torch.Generator]:
     if seed is not None:
         if isinstance(seed, list):

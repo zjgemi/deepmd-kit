@@ -43,7 +43,7 @@ dtype = env.GLOBAL_PT_FLOAT_PRECISION
 
 
 class TestPolarFitting(unittest.TestCase, TestCaseSingleFrameWithNlist):
-    def setUp(self):
+    def setUp(self) -> None:
         TestCaseSingleFrameWithNlist.setUp(self)
         self.rng = np.random.default_rng(GLOBAL_SEED)
         self.nf, self.nloc, _ = self.nlist.shape
@@ -52,7 +52,7 @@ class TestPolarFitting(unittest.TestCase, TestCaseSingleFrameWithNlist):
 
     def test_consistency(
         self,
-    ):
+    ) -> None:
         rd0, gr, _, _, _ = self.dd0(
             torch.tensor(self.coord_ext, dtype=dtype, device=env.DEVICE),
             torch.tensor(self.atype_ext, dtype=int, device=env.DEVICE),
@@ -77,6 +77,7 @@ class TestPolarFitting(unittest.TestCase, TestCaseSingleFrameWithNlist):
                 mixed_types=self.dd0.mixed_types(),
                 fit_diag=fit_diag,
                 scale=scale,
+                seed=GLOBAL_SEED,
             ).to(env.DEVICE)
             ft1 = DPPolarFitting.deserialize(ft0.serialize())
             ft2 = PolarFittingNet.deserialize(ft0.serialize())
@@ -128,7 +129,7 @@ class TestPolarFitting(unittest.TestCase, TestCaseSingleFrameWithNlist):
 
     def test_jit(
         self,
-    ):
+    ) -> None:
         for mixed_types, nfp, nap, fit_diag in itertools.product(
             [True, False],
             [0, 3],
@@ -143,6 +144,7 @@ class TestPolarFitting(unittest.TestCase, TestCaseSingleFrameWithNlist):
                 numb_aparam=nap,
                 mixed_types=mixed_types,
                 fit_diag=fit_diag,
+                seed=GLOBAL_SEED,
             ).to(env.DEVICE)
             torch.jit.script(ft0)
 
@@ -164,7 +166,7 @@ class TestEquivalence(unittest.TestCase):
         self.cell = (self.cell + self.cell.T) + 5.0 * torch.eye(3, device=env.DEVICE)
         self.scale = self.rng.uniform(0, 1, self.nt).tolist()
 
-    def test_rot(self):
+    def test_rot(self) -> None:
         atype = self.atype.reshape(1, 5)
         rmat = torch.tensor(special_ortho_group.rvs(3), dtype=dtype, device=env.DEVICE)
         coord_rot = torch.matmul(self.coord, rmat)
@@ -186,6 +188,7 @@ class TestEquivalence(unittest.TestCase):
                 mixed_types=self.dd0.mixed_types(),
                 fit_diag=fit_diag,
                 scale=scale,
+                seed=GLOBAL_SEED,
             ).to(env.DEVICE)
             if nfp > 0:
                 ifp = torch.tensor(
@@ -236,7 +239,7 @@ class TestEquivalence(unittest.TestCase):
                 ),
             )
 
-    def test_permu(self):
+    def test_permu(self) -> None:
         coord = torch.matmul(self.coord, self.cell)
         for fit_diag, scale in itertools.product([True, False], [None, self.scale]):
             ft0 = PolarFittingNet(
@@ -248,6 +251,7 @@ class TestEquivalence(unittest.TestCase):
                 mixed_types=self.dd0.mixed_types(),
                 fit_diag=fit_diag,
                 scale=scale,
+                seed=GLOBAL_SEED,
             ).to(env.DEVICE)
             res = []
             for idx_perm in [[0, 1, 2, 3, 4], [1, 0, 4, 3, 2]]:
@@ -280,7 +284,7 @@ class TestEquivalence(unittest.TestCase):
                 to_numpy_array(res[1]),
             )
 
-    def test_trans(self):
+    def test_trans(self) -> None:
         atype = self.atype.reshape(1, 5)
         coord_s = torch.matmul(
             torch.remainder(
@@ -298,6 +302,7 @@ class TestEquivalence(unittest.TestCase):
                 mixed_types=self.dd0.mixed_types(),
                 fit_diag=fit_diag,
                 scale=scale,
+                seed=GLOBAL_SEED,
             ).to(env.DEVICE)
             res = []
             for xyz in [self.coord, coord_s]:
@@ -321,14 +326,14 @@ class TestEquivalence(unittest.TestCase):
                     nlist,
                 )
 
-                ret0 = ft0(rd0, atype, gr0, fparam=0, aparam=0)
+                ret0 = ft0(rd0, atype, gr0, fparam=None, aparam=None)
                 res.append(ret0["polarizability"])
 
             np.testing.assert_allclose(to_numpy_array(res[0]), to_numpy_array(res[1]))
 
 
 class TestPolarModel(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.natoms = 5
         self.rcut = 4.0
         self.nt = 3
@@ -347,12 +352,13 @@ class TestPolarModel(unittest.TestCase):
             numb_fparam=0,
             numb_aparam=0,
             mixed_types=self.dd0.mixed_types(),
+            seed=GLOBAL_SEED,
         ).to(env.DEVICE)
         self.type_mapping = ["O", "H", "B"]
         self.model = PolarModel(self.dd0, self.ft0, self.type_mapping)
         self.file_path = "model_output.pth"
 
-    def test_deepdipole_infer(self):
+    def test_deepdipole_infer(self) -> None:
         atype = self.atype.view(self.nf, self.natoms)
         coord = self.coord.reshape(1, 5, 3)
         cell = self.cell.reshape(1, 9)

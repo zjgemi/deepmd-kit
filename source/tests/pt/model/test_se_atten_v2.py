@@ -16,6 +16,9 @@ from deepmd.pt.utils.env import (
     PRECISION_DICT,
 )
 
+from ...seed import (
+    GLOBAL_SEED,
+)
 from .test_env_mat import (
     TestCaseSingleFrameWithNlist,
 )
@@ -27,12 +30,12 @@ dtype = env.GLOBAL_PT_FLOAT_PRECISION
 
 
 class TestDescrptSeAttenV2(unittest.TestCase, TestCaseSingleFrameWithNlist):
-    def setUp(self):
+    def setUp(self) -> None:
         TestCaseSingleFrameWithNlist.setUp(self)
 
     def test_consistency(
         self,
-    ):
+    ) -> None:
         rng = np.random.default_rng(100)
         nf, nloc, nnei = self.nlist.shape
         davg = rng.normal(size=(self.nt, nnei, 4))
@@ -63,7 +66,7 @@ class TestDescrptSeAttenV2(unittest.TestCase, TestCaseSingleFrameWithNlist):
                 type_one_side=to,
                 use_econf_tebd=ect,
                 type_map=["O", "H"] if ect else None,
-                old_impl=False,
+                seed=GLOBAL_SEED,
             ).to(env.DEVICE)
             dd0.se_atten.mean = torch.tensor(davg, dtype=dtype, device=env.DEVICE)
             dd0.se_atten.stddev = torch.tensor(dstd, dtype=dtype, device=env.DEVICE)
@@ -103,7 +106,7 @@ class TestDescrptSeAttenV2(unittest.TestCase, TestCaseSingleFrameWithNlist):
 
     def test_jit(
         self,
-    ):
+    ) -> None:
         rng = np.random.default_rng()
         _, _, nnei = self.nlist.shape
         davg = rng.normal(size=(self.nt, nnei, 4))
@@ -134,7 +137,7 @@ class TestDescrptSeAttenV2(unittest.TestCase, TestCaseSingleFrameWithNlist):
                 type_one_side=to,
                 use_econf_tebd=ect,
                 type_map=["O", "H"] if ect else None,
-                old_impl=False,
+                seed=GLOBAL_SEED,
             )
             dd0.se_atten.mean = torch.tensor(davg, dtype=dtype, device=env.DEVICE)
             dd0.se_atten.dstd = torch.tensor(dstd, dtype=dtype, device=env.DEVICE)

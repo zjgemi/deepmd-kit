@@ -27,7 +27,6 @@ from pathlib import (
     Path,
 )
 from typing import (
-    Dict,
     Optional,
 )
 
@@ -136,7 +135,7 @@ class Case:
         The path to the test case file.
     """
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str) -> None:
         with open(filename) as file:
             config = yaml.safe_load(file)
         self.key = config["key"]
@@ -147,6 +146,7 @@ class Case:
         self.type_map = config["type_map"]
         self.dim_fparam = config["dim_fparam"]
         self.dim_aparam = config["dim_aparam"]
+        self.model_def_script = config.get("model_def_script")
 
     @lru_cache
     def get_model(self, suffix: str, out_file: Optional[str] = None) -> str:
@@ -174,12 +174,12 @@ class Case:
 
 
 @lru_cache
-def get_cases() -> Dict[str, Case]:
+def get_cases() -> dict[str, Case]:
     """Get all test cases.
 
     Returns
     -------
-    Dict[str, Case]
+    dict[str, Case]
         A dictionary containing all test cases.
 
     Examples

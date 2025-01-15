@@ -4,10 +4,6 @@ import logging
 import os
 import shutil
 import time
-from typing import (
-    Dict,
-    List,
-)
 
 import google.protobuf.message
 import numpy as np
@@ -73,7 +69,7 @@ from deepmd.tf.nvnmd.utils.config import (
 )
 
 
-def _is_subdir(path, directory):
+def _is_subdir(path, directory) -> bool:
     path = os.path.realpath(path)
     directory = os.path.realpath(directory)
     if path == directory:
@@ -83,12 +79,12 @@ def _is_subdir(path, directory):
 
 
 class DPTrainer:
-    def __init__(self, jdata, run_opt, is_compress=False):
+    def __init__(self, jdata, run_opt, is_compress=False) -> None:
         self.run_opt = run_opt
         self._init_param(jdata)
         self.is_compress = is_compress
 
-    def _init_param(self, jdata):
+    def _init_param(self, jdata) -> None:
         # model config
         model_param = jdata["model"]
 
@@ -174,7 +170,7 @@ class DPTrainer:
         self.ckpt_meta = None
         self.model_type = None
 
-    def build(self, data=None, stop_batch=0, origin_type_map=None, suffix=""):
+    def build(self, data=None, stop_batch=0, origin_type_map=None, suffix="") -> None:
         self.ntypes = self.model.get_ntypes()
         self.stop_batch = stop_batch
 
@@ -184,7 +180,7 @@ class DPTrainer:
             ), "Data in mixed_type format must use ener fitting!"
 
         if self.numb_fparam > 0:
-            log.info("training with %d frame parameter(s)" % self.numb_fparam)
+            log.info(f"training with {self.numb_fparam} frame parameter(s)")
         else:
             log.info("training without frame parameter")
 
@@ -195,13 +191,12 @@ class DPTrainer:
             single_data = data
             if self.ntypes < single_data.get_ntypes():
                 raise ValueError(
-                    "The number of types of the training data is %d, but that of the "
-                    "model is only %d. The latter must be no less than the former. "
+                    f"The number of types of the training data is {single_data.get_ntypes()}, but that of the "
+                    f"model is only {self.ntypes}. The latter must be no less than the former. "
                     "You may need to reset one or both of them. Usually, the former "
                     "is given by `model/type_map` in the training parameter (if set) "
                     "or the maximum number in the training data. The latter is given "
                     "by `model/descriptor/sel` in the training parameter."
-                    % (single_data.get_ntypes(), self.ntypes)
                 )
             self.type_map = single_data.get_type_map()
             self.batch_size = data.get_batch_size()
@@ -244,7 +239,7 @@ class DPTrainer:
         self._build_network(data, suffix)
         self._build_training()
 
-    def _build_lr(self):
+    def _build_lr(self) -> None:
         self._extra_train_ops = []
         self.global_step = tf.train.get_or_create_global_step()
         self.learning_rate = self.lr.build(self.global_step, self.stop_batch)
@@ -267,7 +262,7 @@ class DPTrainer:
 
         return l2_l, l2_more
 
-    def _build_network(self, data, suffix=""):
+    def _build_network(self, data, suffix="") -> None:
         self.place_holders = {}
         if self.is_compress:
             for kk in ["coord", "box"]:
@@ -332,7 +327,7 @@ class DPTrainer:
                 )
         return optimizer
 
-    def _build_training(self):
+    def _build_training(self) -> None:
         if self.stop_batch == 0:
             # self.train_op is not used if stop_batch is zero
             self.train_op = None
@@ -351,7 +346,7 @@ class DPTrainer:
         self.train_op = tf.group(*train_ops)
         log.info("built training")
 
-    def _init_session(self):
+    def _init_session(self) -> None:
         config = get_tf_session_config()
         device, idx = self.run_opt.my_device.split(":", 1)
         if device == "gpu":
@@ -406,31 +401,31 @@ class DPTrainer:
                 log.info("receive global variables from task#0")
             run_sess(self.sess, bcast_op)
 
-    def train(self, train_data=None, valid_data=None):
+    def train(self, train_data=None, valid_data=None) -> None:
         # if valid_data is None:  # no validation set specified.
         #     valid_data = train_data  # using training set as validation set.
 
         stop_batch = self.stop_batch
         self._init_session()
 
-        # Before data shard is enabled, only cheif do evaluation and record it
+        # Before data shard is enabled, only chief do evaluation and record it
         # self.print_head()
         fp = None
         if self.run_opt.is_chief:
             fp = open(self.disp_file, "a")
 
         cur_batch = run_sess(self.sess, self.global_step)
+        start_batch = cur_batch
+        elapsed_batch = stop_batch - start_batch
         is_first_step = True
         self.cur_batch = cur_batch
         log.info(
-            "start training at lr %.2e (== %.2e), decay_step %d, decay_rate %f, final lr will be %.2e"
-            % (
-                run_sess(self.sess, self.learning_rate),
-                self.lr.value(cur_batch),
-                self.lr.decay_steps_,
-                self.lr.decay_rate_,
-                self.lr.value(stop_batch),
-            )
+            "start training at lr %.2e (== %.2e), decay_step %d, decay_rate %f, final lr will be %.2e",
+            run_sess(self.sess, self.learning_rate),
+            self.lr.value(cur_batch),
+            self.lr.decay_steps_,
+            self.lr.decay_rate_,
+            self.lr.value(stop_batch),
         )
 
         prf_options = None
@@ -556,7 +551,10 @@ class DPTrainer:
                         )
                     )
                     # the first training time is not accurate
-                    if cur_batch > self.disp_freq or stop_batch < 2 * self.disp_freq:
+                    if (
+                        cur_batch - start_batch > self.disp_freq
+                        or elapsed_batch < 2 * self.disp_freq
+                    ):
                         total_train_time += train_time
                     train_time = 0
                     wall_time_tic = toc
@@ -598,18 +596,23 @@ class DPTrainer:
             self.save_checkpoint(cur_batch)
         if self.run_opt.is_chief:
             fp.close()
-        if self.timing_in_training and stop_batch // self.disp_freq > 0:
-            if stop_batch >= 2 * self.disp_freq:
+        elapsed_batch = stop_batch - start_batch
+        if self.timing_in_training and elapsed_batch // self.disp_freq > 0:
+            if elapsed_batch >= 2 * self.disp_freq:
                 log.info(
                     "average training time: %.4f s/batch (exclude first %d batches)",
                     total_train_time
-                    / (stop_batch // self.disp_freq * self.disp_freq - self.disp_freq),
+                    / (
+                        elapsed_batch // self.disp_freq * self.disp_freq
+                        - self.disp_freq
+                    ),
                     self.disp_freq,
                 )
             else:
                 log.info(
                     "average training time: %.4f s/batch",
-                    total_train_time / (stop_batch // self.disp_freq * self.disp_freq),
+                    total_train_time
+                    / (elapsed_batch // self.disp_freq * self.disp_freq),
                 )
 
         if self.profiling and self.run_opt.is_chief:
@@ -620,7 +623,7 @@ class DPTrainer:
         if self.enable_profiler and self.run_opt.is_chief:
             tfv2.profiler.experimental.stop()
 
-    def save_checkpoint(self, cur_batch: int):
+    def save_checkpoint(self, cur_batch: int) -> None:
         try:
             ckpt_prefix = self.saver.save(
                 self.sess,
@@ -668,7 +671,7 @@ class DPTrainer:
 
     def valid_on_the_fly(
         self, fp, train_batches, valid_batches, print_header=False, fitting_key=None
-    ):
+    ) -> None:
         train_results = self.get_evaluation_results(train_batches)
         valid_results = self.get_evaluation_results(valid_batches)
 
@@ -685,9 +688,9 @@ class DPTrainer:
         )
 
     @staticmethod
-    def print_header(fp, train_results, valid_results):
+    def print_header(fp, train_results, valid_results) -> None:
         print_str = ""
-        print_str += "# %5s" % "step"
+        print_str += "# {:5s}".format("step")
         if valid_results is not None:
             prop_fmt = "   %11s %11s"
             for k in train_results.keys():
@@ -696,7 +699,7 @@ class DPTrainer:
             prop_fmt = "   %11s"
             for k in train_results.keys():
                 print_str += prop_fmt % (k + "_trn")
-        print_str += "   %8s\n" % "lr"
+        print_str += "   {:8s}\n".format("lr")
         print_str += "# If there is no available reference data, rmse_*_{val,trn} will print nan\n"
         fp.write(print_str)
         fp.flush()
@@ -708,9 +711,9 @@ class DPTrainer:
         valid_results,
         cur_batch,
         cur_lr,
-    ):
+    ) -> None:
         print_str = ""
-        print_str += "%7d" % cur_batch
+        print_str += f"{cur_batch:7d}"
         if valid_results is not None:
             prop_fmt = "   %11.2e %11.2e"
             for k in valid_results.keys():
@@ -772,13 +775,13 @@ class DPTrainer:
         )
         return avg_results
 
-    def save_compressed(self):
+    def save_compressed(self) -> None:
         """Save the compressed graph."""
         self._init_session()
         if self.is_compress:
             self.saver.save(self.sess, os.path.join(os.getcwd(), self.save_ckpt))
 
-    def _get_place_holders(self, data_dict):
+    def _get_place_holders(self, data_dict) -> None:
         for kk in data_dict.keys():
             if kk == "type":
                 continue
@@ -790,7 +793,7 @@ class DPTrainer:
                 tf.float32, name="t_find_" + kk
             )
 
-    def _init_from_frz_model(self):
+    def _init_from_frz_model(self) -> None:
         try:
             graph, graph_def = load_graph_def(self.run_opt.init_frz_model)
         except FileNotFoundError as e:
@@ -813,7 +816,7 @@ class DPTrainer:
             self.frz_model = self.run_opt.init_frz_model
         self.model.init_variables(graph, graph_def, model_type=self.model_type)
 
-    def _init_from_ckpt(self, ckpt_meta: str):
+    def _init_from_ckpt(self, ckpt_meta: str) -> None:
         with tf.Graph().as_default() as graph:
             tf.train.import_meta_graph(f"{ckpt_meta}.meta", clear_devices=True)
         # get the model type from the model
@@ -828,7 +831,7 @@ class DPTrainer:
 
     def _init_from_pretrained_model(
         self, data, origin_type_map=None, bias_adjust_mode="change-by-statistic"
-    ):
+    ) -> None:
         """Init the embedding net variables with the given frozen model.
 
         Parameters
@@ -840,7 +843,7 @@ class DPTrainer:
         bias_adjust_mode : str
             The mode for changing energy bias : ['change-by-statistic', 'set-by-statistic']
             'change-by-statistic' : perform predictions on energies of target dataset,
-                    and do least sqaure on the errors to obtain the target shift as bias.
+                    and do least square on the errors to obtain the target shift as bias.
             'set-by-statistic' : directly use the statistic energy bias in the target dataset.
         """
         try:
@@ -880,7 +883,7 @@ class DPTrainer:
         frozen_model,
         origin_type_map,
         bias_adjust_mode="change-by-statistic",
-    ):
+    ) -> None:
         full_type_map = data.get_type_map()
         self.model.change_energy_bias(
             data,
@@ -891,7 +894,7 @@ class DPTrainer:
         )
 
     @property
-    def data_requirements(self) -> List[DataRequirementItem]:
+    def data_requirements(self) -> list[DataRequirementItem]:
         return self.model.input_requirement + self.loss.label_requirement
 
 
@@ -915,42 +918,42 @@ class DatasetLoader:
     >>> data_dict = loader.get_data_dict(data_list)
     """
 
-    def __init__(self, train_data: DeepmdDataSystem):
+    def __init__(self, train_data: DeepmdDataSystem) -> None:
         self.train_data = train_data
         # get the keys of the data
         batch_data = self.train_data.get_batch()
         self.data_keys = batch_data.keys()
         self.data_types = [tf.as_dtype(x.dtype) for x in batch_data.values()]
 
-    def build(self) -> List[tf.Tensor]:
+    def build(self) -> list[tf.Tensor]:
         """Build the OP that loads the training data.
 
         Returns
         -------
-        List[tf.Tensor]
+        list[tf.Tensor]
             Tensor of the loaded data.
         """
         train_data = self.train_data
 
-        def get_train_batch() -> List[np.ndarray]:
+        def get_train_batch() -> list[np.ndarray]:
             batch_data = train_data.get_batch()
-            # convert dict to list of arryas
+            # convert dict to list of arrays
             batch_data = tuple([batch_data[kk] for kk in self.data_keys])
             return batch_data
 
         return tf.py_func(get_train_batch, [], self.data_types, name="train_data")
 
-    def get_data_dict(self, batch_list: List[np.ndarray]) -> Dict[str, np.ndarray]:
+    def get_data_dict(self, batch_list: list[np.ndarray]) -> dict[str, np.ndarray]:
         """Generate a dict of the loaded data.
 
         Parameters
         ----------
-        batch_list : List[np.ndarray]
+        batch_list : list[np.ndarray]
             The loaded data.
 
         Returns
         -------
-        Dict[str, np.ndarray]
+        dict[str, np.ndarray]
             The dict of the loaded data.
         """
         return dict(zip(self.data_keys, batch_list))

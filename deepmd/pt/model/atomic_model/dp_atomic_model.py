@@ -1,10 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-import copy
 import functools
 import logging
 from typing import (
-    Dict,
-    List,
     Optional,
 )
 
@@ -52,9 +49,9 @@ class DPAtomicModel(BaseAtomicModel):
         self,
         descriptor,
         fitting,
-        type_map: List[str],
+        type_map: list[str],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(type_map, **kwargs)
         ntypes = len(type_map)
         self.type_map = type_map
@@ -64,6 +61,19 @@ class DPAtomicModel(BaseAtomicModel):
         self.sel = self.descriptor.get_sel()
         self.fitting_net = fitting
         super().init_out_stat()
+        self.enable_eval_descriptor_hook = False
+        self.eval_descriptor_list = []
+
+    eval_descriptor_list: list[torch.Tensor]
+
+    def set_eval_descriptor_hook(self, enable: bool) -> None:
+        """Set the hook for evaluating descriptor and clear the cache for descriptor list."""
+        self.enable_eval_descriptor_hook = enable
+        self.eval_descriptor_list = []
+
+    def eval_descriptor(self) -> torch.Tensor:
+        """Evaluate the descriptor."""
+        return torch.concat(self.eval_descriptor_list)
 
     @torch.jit.export
     def fitting_output_def(self) -> FittingOutputDef:
@@ -79,9 +89,16 @@ class DPAtomicModel(BaseAtomicModel):
         """Get the cut-off radius."""
         return self.rcut
 
-    def get_sel(self) -> List[int]:
+    def get_sel(self) -> list[int]:
         """Get the neighbor selection."""
         return self.sel
+
+    def set_case_embd(self, case_idx: int):
+        """
+        Set the case embedding of this atomic model by the given case_idx,
+        typically concatenated with the output of the descriptor and fed into the fitting net.
+        """
+        self.fitting_net.set_case_embd(case_idx)
 
     def mixed_types(self) -> bool:
         """If true, the model
@@ -96,7 +113,7 @@ class DPAtomicModel(BaseAtomicModel):
         return self.descriptor.mixed_types()
 
     def change_type_map(
-        self, type_map: List[str], model_with_new_type_stat=None
+        self, type_map: list[str], model_with_new_type_stat=None
     ) -> None:
         """Change the type related params to new ones, according to `type_map` and the original one in the model.
         If there are new types in `type_map`, statistics will be updated accordingly to `model_with_new_type_stat` for these new types.
@@ -138,7 +155,7 @@ class DPAtomicModel(BaseAtomicModel):
 
     @classmethod
     def deserialize(cls, data) -> "DPAtomicModel":
-        data = copy.deepcopy(data)
+        data = data.copy()
         check_version_compatibility(data.pop("@version", 1), 2, 1)
         data.pop("@class", None)
         data.pop("type", None)
@@ -149,6 +166,37 @@ class DPAtomicModel(BaseAtomicModel):
         obj = super().deserialize(data)
         return obj
 
+    def enable_compression(
+        self,
+        min_nbor_dist: float,
+        table_extrapolate: float = 5,
+        table_stride_1: float = 0.01,
+        table_stride_2: float = 0.1,
+        check_frequency: int = -1,
+    ) -> None:
+        """Call descriptor enable_compression().
+
+        Parameters
+        ----------
+        min_nbor_dist
+            The nearest distance between atoms
+        table_extrapolate
+            The scale of model extrapolation
+        table_stride_1
+            The uniform stride of the first table
+        table_stride_2
+            The uniform stride of the second table
+        check_frequency
+            The overflow check frequency
+        """
+        self.descriptor.enable_compression(
+            min_nbor_dist,
+            table_extrapolate,
+            table_stride_1,
+            table_stride_2,
+            check_frequency,
+        )
+
     def forward_atomic(
         self,
         extended_coord,
@@ -157,14 +205,14 @@ class DPAtomicModel(BaseAtomicModel):
         mapping: Optional[torch.Tensor] = None,
         fparam: Optional[torch.Tensor] = None,
         aparam: Optional[torch.Tensor] = None,
-        comm_dict: Optional[Dict[str, torch.Tensor]] = None,
-    ) -> Dict[str, torch.Tensor]:
+        comm_dict: Optional[dict[str, torch.Tensor]] = None,
+    ) -> dict[str, torch.Tensor]:
         """Return atomic prediction.
 
         Parameters
         ----------
         extended_coord
-            coodinates in extended region
+            coordinates in extended region
         extended_atype
             atomic type in extended region
         nlist
@@ -194,6 +242,8 @@ class DPAtomicModel(BaseAtomicModel):
             comm_dict=comm_dict,
         )
         assert descriptor is not None
+        if self.enable_eval_descriptor_hook:
+            self.eval_descriptor_list.append(descriptor)
         # energy, force
         fit_ret = self.fitting_net(
             descriptor,
@@ -213,7 +263,7 @@ class DPAtomicModel(BaseAtomicModel):
         self,
         sampled_func,
         stat_file_path: Optional[DPPath] = None,
-    ):
+    ) -> None:
         """
         Compute or load the statistics parameters of the model,
         such as mean and standard deviation of descriptors or the energy bias of the fitting net.
@@ -258,7 +308,7 @@ class DPAtomicModel(BaseAtomicModel):
         """Get the number (dimension) of atomic parameters of this atomic model."""
         return self.fitting_net.get_dim_aparam()
 
-    def get_sel_type(self) -> List[int]:
+    def get_sel_type(self) -> list[int]:
         """Get the selected atom types of this model.
 
         Only atoms with selected atom types have atomic contribution

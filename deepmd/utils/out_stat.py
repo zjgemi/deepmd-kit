@@ -3,10 +3,13 @@
 
 from typing import (
     Optional,
-    Tuple,
 )
 
 import numpy as np
+
+from deepmd.env import (
+    GLOBAL_NP_FLOAT_PRECISION,
+)
 
 
 def compute_stats_from_redu(
@@ -14,11 +17,11 @@ def compute_stats_from_redu(
     natoms: np.ndarray,
     assigned_bias: Optional[np.ndarray] = None,
     rcond: Optional[float] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Compute the output statistics.
 
     Given the reduced output value and the number of atoms for each atom,
-    compute the least-squares solution as the atomic output bais and std.
+    compute the least-squares solution as the atomic output bias and std.
 
     Parameters
     ----------
@@ -86,11 +89,11 @@ def compute_stats_from_redu(
 def compute_stats_from_atomic(
     output: np.ndarray,
     atype: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Compute the output statistics.
 
     Given the output value and the type of atoms,
-    compute the atomic output bais and std.
+    compute the atomic output bias and std.
 
     Parameters
     ----------
@@ -116,8 +119,8 @@ def compute_stats_from_atomic(
     # compute output bias
     nframes, nloc, ndim = output.shape
     ntypes = atype.max() + 1
-    output_bias = np.zeros((ntypes, ndim))  # pylint: disable=no-explicit-dtype
-    output_std = np.zeros((ntypes, ndim))  # pylint: disable=no-explicit-dtype
+    output_bias = np.zeros((ntypes, ndim), dtype=GLOBAL_NP_FLOAT_PRECISION)
+    output_std = np.zeros((ntypes, ndim), dtype=GLOBAL_NP_FLOAT_PRECISION)
     for type_i in range(ntypes):
         mask = atype == type_i
         output_bias[type_i] = (
@@ -127,3 +130,64 @@ def compute_stats_from_atomic(
             output[mask].std(axis=0) if output[mask].size > 0 else np.nan
         )
     return output_bias, output_std
+
+
+def compute_stats_do_not_distinguish_types(
+    output_redu: np.ndarray,
+    natoms: np.ndarray,
+    assigned_bias: Optional[np.ndarray] = None,
+    intensive: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute element-independent statistics for property fitting.
+
+    Computes mean and standard deviation of the output, treating all elements equally.
+    For extensive properties, the output is normalized by the total number of atoms
+    before computing statistics.
+
+    Parameters
+    ----------
+    output_redu
+        The reduced output value, shape is [nframes, *(odim0, odim1, ...)].
+    natoms
+        The number of atoms for each atom, shape is [nframes, ntypes].
+        Used for normalization of extensive properties and generating uniform bias.
+    assigned_bias
+        The assigned output bias, shape is [ntypes, *(odim0, odim1, ...)].
+        Set to a tensor of shape (odim0, odim1, ...) filled with nan if the bias
+        of the type is not assigned.
+    intensive
+        Whether the output is intensive or extensive.
+        If False, the output will be normalized by the total number of atoms before computing statistics.
+
+    Returns
+    -------
+    np.ndarray
+        The computed output mean(fake bias), shape is [ntypes, *(odim0, odim1, ...)].
+        The same bias is used for all atom types.
+    np.ndarray
+        The computed output standard deviation, shape is [ntypes, *(odim0, odim1, ...)].
+        The same standard deviation is used for all atom types.
+    """
+    natoms = np.array(natoms)  # [nf, ntypes]
+    nf, ntypes = natoms.shape
+    output_redu = np.array(output_redu)
+    var_shape = list(output_redu.shape[1:])
+    output_redu = output_redu.reshape(nf, -1)
+    if not intensive:
+        total_atoms = natoms.sum(axis=1)
+        output_redu = output_redu / total_atoms[:, np.newaxis]
+    # check shape
+    assert output_redu.ndim == 2
+    assert natoms.ndim == 2
+    assert output_redu.shape[0] == natoms.shape[0]  # [nf,1]
+
+    computed_output_bias = np.repeat(
+        np.mean(output_redu, axis=0)[np.newaxis, :], ntypes, axis=0
+    )
+    output_std = np.std(output_redu, axis=0)
+
+    computed_output_bias = computed_output_bias.reshape([natoms.shape[1]] + var_shape)  # noqa: RUF005
+    output_std = output_std.reshape(var_shape)
+    output_std = np.tile(output_std, (computed_output_bias.shape[0], 1))
+
+    return computed_output_bias, output_std

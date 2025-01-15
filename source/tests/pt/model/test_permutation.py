@@ -5,9 +5,6 @@ import unittest
 
 import torch
 
-from deepmd.pt.infer.deep_eval import (
-    eval_model,
-)
 from deepmd.pt.model.model import (
     get_model,
 )
@@ -17,6 +14,9 @@ from deepmd.pt.utils import (
 
 from ...seed import (
     GLOBAL_SEED,
+)
+from ..common import (
+    eval_model,
 )
 
 CUR_DIR = os.path.dirname(__file__)
@@ -88,6 +88,7 @@ model_zbl = {
         "temperature": 1.0,
         "set_davg_zero": True,
         "type_one_side": True,
+        "seed": 1,
     },
     "fitting_net": {
         "neuron": [24, 24, 24],
@@ -96,6 +97,7 @@ model_zbl = {
     },
     "data_stat_nbatch": 20,
 }
+
 
 model_spin = {
     "type_map": ["O", "H", "B"],
@@ -155,6 +157,60 @@ model_dpa2 = {
             "update_g2_has_attn": True,
             "attn2_has_gate": True,
         },
+        "seed": 1,
+        "add_tebd_to_repinit_out": False,
+    },
+    "fitting_net": {
+        "neuron": [24, 24],
+        "resnet_dt": True,
+        "seed": 1,
+    },
+}
+
+model_dpa2tebd = {
+    "type_map": ["O", "H", "B"],
+    "descriptor": {
+        "type": "dpa2",
+        "repinit": {
+            "rcut": 6.0,
+            "rcut_smth": 0.5,
+            "nsel": 100,
+            "neuron": [2, 4, 8],
+            "axis_neuron": 4,
+            "activation_function": "tanh",
+            "three_body_sel": 40,
+            "three_body_rcut": 4.0,
+            "three_body_rcut_smth": 3.5,
+            "use_three_body": True,
+        },
+        "repformer": {
+            "rcut": 4.0,
+            "rcut_smth": 0.5,
+            "nsel": 40,
+            "nlayers": 6,
+            "g1_dim": 8,
+            "g2_dim": 5,
+            "attn2_hidden": 3,
+            "attn2_nhead": 1,
+            "attn1_hidden": 5,
+            "attn1_nhead": 1,
+            "axis_neuron": 4,
+            "update_h2": False,
+            "update_g1_has_conv": True,
+            "update_g1_has_grrg": True,
+            "update_g1_has_drrd": True,
+            "update_g1_has_attn": False,
+            "update_g2_has_g1g1": False,
+            "update_g2_has_attn": True,
+            "update_style": "res_residual",
+            "update_residual": 0.01,
+            "update_residual_init": "norm",
+            "attn2_has_gate": True,
+            "use_sqrt_nnei": True,
+            "g1_out_conv": True,
+            "g1_out_mlp": True,
+        },
+        "seed": 1,
         "add_tebd_to_repinit_out": False,
     },
     "fitting_net": {
@@ -183,6 +239,7 @@ model_dpa1 = {
         "temperature": 1.0,
         "set_davg_zero": True,
         "type_one_side": True,
+        "seed": 1,
     },
     "fitting_net": {
         "neuron": [24, 24, 24],
@@ -212,6 +269,7 @@ model_hybrid = {
                 "scaling_factor": 1.0,
                 "normalize": True,
                 "temperature": 1.0,
+                "seed": 1,
             },
             {
                 "type": "dpa2",
@@ -244,6 +302,7 @@ model_hybrid = {
                     "update_g2_has_attn": True,
                     "attn2_has_gate": True,
                 },
+                "seed": 1,
                 "add_tebd_to_repinit_out": False,
             },
         ],
@@ -257,11 +316,34 @@ model_hybrid = {
     "_comment": " that's all",
 }
 
+model_property = {
+    "type_map": ["H", "C", "N", "O"],
+    "descriptor": {
+        "type": "se_e2_a",
+        "sel": [3, 3, 3, 3],
+        "rcut_smth": 0.50,
+        "rcut": 4.00,
+        "neuron": [25, 50, 100],
+        "resnet_dt": False,
+        "axis_neuron": 16,
+        "seed": 1,
+    },
+    "fitting_net": {
+        "type": "property",
+        "task_dim": 3,
+        "property_name": "band_property",
+        "neuron": [24, 24, 24],
+        "resnet_dt": True,
+        "intensive": True,
+        "seed": 1,
+    },
+}
+
 
 class PermutationTest:
     def test(
         self,
-    ):
+    ) -> None:
         natoms = 5
         generator = torch.Generator(device=env.DEVICE).manual_seed(GLOBAL_SEED)
         cell = torch.rand([3, 3], dtype=dtype, device=env.DEVICE, generator=generator)
@@ -314,35 +396,35 @@ class PermutationTest:
 
 
 class TestEnergyModelSeA(unittest.TestCase, PermutationTest):
-    def setUp(self):
+    def setUp(self) -> None:
         model_params = copy.deepcopy(model_se_e2_a)
         self.type_split = False
         self.model = get_model(model_params).to(env.DEVICE)
 
 
 class TestDOSModelSeA(unittest.TestCase, PermutationTest):
-    def setUp(self):
+    def setUp(self) -> None:
         model_params = copy.deepcopy(model_dos)
         self.type_split = False
         self.model = get_model(model_params).to(env.DEVICE)
 
 
 class TestEnergyModelDPA1(unittest.TestCase, PermutationTest):
-    def setUp(self):
+    def setUp(self) -> None:
         model_params = copy.deepcopy(model_dpa1)
         self.type_split = True
         self.model = get_model(model_params).to(env.DEVICE)
 
 
 class TestEnergyModelDPA2(unittest.TestCase, PermutationTest):
-    def setUp(self):
+    def setUp(self) -> None:
         model_params = copy.deepcopy(model_dpa2)
         self.type_split = True
         self.model = get_model(model_params).to(env.DEVICE)
 
 
 class TestForceModelDPA2(unittest.TestCase, PermutationTest):
-    def setUp(self):
+    def setUp(self) -> None:
         model_params = copy.deepcopy(model_dpa2)
         model_params["fitting_net"]["type"] = "direct_force_ener"
         self.type_split = True
@@ -351,14 +433,14 @@ class TestForceModelDPA2(unittest.TestCase, PermutationTest):
 
 
 class TestEnergyModelHybrid(unittest.TestCase, PermutationTest):
-    def setUp(self):
+    def setUp(self) -> None:
         model_params = copy.deepcopy(model_hybrid)
         self.type_split = True
         self.model = get_model(model_params).to(env.DEVICE)
 
 
 class TestForceModelHybrid(unittest.TestCase, PermutationTest):
-    def setUp(self):
+    def setUp(self) -> None:
         model_params = copy.deepcopy(model_hybrid)
         model_params["fitting_net"]["type"] = "direct_force_ener"
         self.type_split = True
@@ -367,14 +449,14 @@ class TestForceModelHybrid(unittest.TestCase, PermutationTest):
 
 
 class TestEnergyModelZBL(unittest.TestCase, PermutationTest):
-    def setUp(self):
+    def setUp(self) -> None:
         model_params = copy.deepcopy(model_zbl)
         self.type_split = False
         self.model = get_model(model_params).to(env.DEVICE)
 
 
 class TestEnergyModelSpinSeA(unittest.TestCase, PermutationTest):
-    def setUp(self):
+    def setUp(self) -> None:
         model_params = copy.deepcopy(model_spin)
         self.type_split = False
         self.test_spin = True

@@ -1,7 +1,4 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-from typing import (
-    List,
-)
 
 import torch
 import torch.nn.functional as F
@@ -38,7 +35,7 @@ class EnergySpinLoss(TaskLoss):
         use_l1_all: bool = False,
         inference=False,
         **kwargs,
-    ):
+    ) -> None:
         r"""Construct a layer to compute loss on energy, real force, magnetic force and virial.
 
         Parameters
@@ -276,7 +273,7 @@ class EnergySpinLoss(TaskLoss):
         return model_pred, loss, more_loss
 
     @property
-    def label_requirement(self) -> List[DataRequirementItem]:
+    def label_requirement(self) -> list[DataRequirementItem]:
         """Return data label requirements needed for this loss calculation."""
         label_requirement = []
         if self.has_e:

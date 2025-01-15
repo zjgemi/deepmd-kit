@@ -16,10 +16,10 @@ For CUDA only:
 # https://stackoverflow.com/a/41901923/9567349
 import sys
 
-if sys.version_info[0] < 3:
+if sys.version_info[0] < 3:  # noqa: UP036
     raise Exception("Python 3 or a more recent version is required.")
 
-# The script should only rely on the stardard Python libraries.
+# The script should only rely on the standard Python libraries.
 
 import argparse
 import hashlib
@@ -56,8 +56,7 @@ from shutil import (
     ignore_patterns,
 )
 from typing import (
-    Dict,
-    List,
+    NoReturn,
     Optional,
 )
 
@@ -93,7 +92,7 @@ dlog.addHandler(handler)
 # Common utils
 
 
-def download_file(url: str, filename: str):
+def download_file(url: str, filename: str) -> None:
     """Download files from remote URL.
 
     Parameters
@@ -156,7 +155,7 @@ class OnlineResource:
                 )
         self.post_process()
 
-    def post_process(self):
+    def post_process(self) -> None:
         if self.executable:
             self.path.chmod(self.path.stat().st_mode | stat.S_IEXEC)
         if self.gzip is not None:
@@ -170,7 +169,9 @@ class OnlineResource:
 
                     return prefix == abs_directory
 
-                def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+                def safe_extract(
+                    tar, path=".", members=None, *, numeric_owner=False
+                ) -> None:
                     for member in tar.getmembers():
                         member_path = os.path.join(path, member.name)
                         if not is_within_directory(path, member_path):
@@ -180,7 +181,7 @@ class OnlineResource:
 
                 safe_extract(tar, path=self.gzip_path)
 
-    def download(self):
+    def download(self) -> None:
         """Download the target file."""
         download_file(self.url, self.path)
 
@@ -225,14 +226,14 @@ class Build(metaclass=ABCMeta):
     """Build process."""
 
     @abstractproperty
-    def resources(self) -> Dict[str, OnlineResource]:
+    def resources(self) -> dict[str, OnlineResource]:
         """Required resources."""
 
     @abstractproperty
-    def dependencies(self) -> Dict[str, "Build"]:
+    def dependencies(self) -> dict[str, "Build"]:
         """Required dependencies."""
 
-    def download_all_resources(self):
+    def download_all_resources(self) -> None:
         """All resources, including dependencies' resources."""
         for res in self.resources.values():
             res()
@@ -272,7 +273,7 @@ class Build(metaclass=ABCMeta):
         """Tmp prefix."""
         return self._prefix
 
-    def copy_from_tmp_to_prefix(self):
+    def copy_from_tmp_to_prefix(self) -> None:
         """Copy from tmp prefix to real prefix."""
         copytree2(str(self.prefix), str(PREFIX))
 
@@ -308,7 +309,7 @@ def list2env(l: list) -> str:
     return ":".join(map(str, l))
 
 
-def get_shlib_ext():
+def get_shlib_ext() -> str:
     """Return the shared library extension."""
     plat = sys.platform
     if plat.startswith("win"):
@@ -326,7 +327,7 @@ def copy3(src: Path, dst: Path, *args, **kwargs):
     return copy2(str(src), str(dst), *args, **kwargs)
 
 
-def copytree2(src: Path, dst: Path, *args, **kwargs):
+def copytree2(src: Path, dst: Path, *args, **kwargs) -> None:
     """Wrapper to copytree and cp to support Pathlib, pattern, and override."""
     with tempfile.TemporaryDirectory() as td:
         # hack to support override
@@ -335,7 +336,7 @@ def copytree2(src: Path, dst: Path, *args, **kwargs):
         call(
             [
                 "/bin/cp",
-                # archieve, recursive, force, do not create one inside
+                # achieve, recursive, force, do not create one inside
                 # https://stackoverflow.com/a/24486142/9567349
                 "-arfT",
                 str(tmpdst),
@@ -364,7 +365,7 @@ def include_patterns(*include_patterns):
     return _ignore_patterns
 
 
-def call(commands: List[str], env={}, **kwargs):
+def call(commands: list[str], env={}, **kwargs) -> None:
     """Call commands and print to screen for debug.
 
     Raises
@@ -380,7 +381,7 @@ def call(commands: List[str], env={}, **kwargs):
 
         if exit_code:
             raise RuntimeError(
-                "Run %s failed, return code: %d" % (" ".join(commands), exit_code)
+                "Run {} failed, return code: {}".format(" ".join(commands), exit_code)
             )
 
 
@@ -388,7 +389,7 @@ def call(commands: List[str], env={}, **kwargs):
 
 # online resources to download
 RESOURCES = {
-    # bazelisk is used to warpper bazel
+    # bazelisk is used to wrapper bazel
     "bazelisk-1.11.0": OnlineResource(
         "bazel-linux-amd64-1.11.0",
         "https://github.com/bazelbuild/bazelisk/releases/download/v1.11.0/bazelisk-linux-amd64",
@@ -423,17 +424,17 @@ class BuildBazelisk(Build):
 
     @property
     @lru_cache
-    def resources(self) -> Dict[str, OnlineResource]:
+    def resources(self) -> dict[str, OnlineResource]:
         return {
             "bazelisk": RESOURCES["bazelisk-" + self.version],
         }
 
     @property
     @lru_cache
-    def dependencies(self) -> Dict[str, Build]:
+    def dependencies(self) -> dict[str, Build]:
         return {}
 
-    def build(self):
+    def build(self) -> None:
         bazel_res = self.resources["bazelisk"]
         bin_dst = self.prefix / "bin"
         bin_dst.mkdir(exist_ok=True)
@@ -449,19 +450,19 @@ class BuildNumPy(Build):
 
     @property
     @lru_cache
-    def resources(self) -> Dict[str, OnlineResource]:
+    def resources(self) -> dict[str, OnlineResource]:
         return {}
 
     @property
     @lru_cache
-    def dependencies(self) -> Dict[str, Build]:
+    def dependencies(self) -> dict[str, Build]:
         return {}
 
     @property
     def built(self) -> bool:
         return importlib.util.find_spec("numpy") is not None
 
-    def build(self):
+    def build(self) -> None:
         try:
             call(
                 [
@@ -481,15 +482,15 @@ class BuildCUDA(Build):
 
     @property
     @lru_cache
-    def resources(self) -> Dict[str, OnlineResource]:
+    def resources(self) -> dict[str, OnlineResource]:
         return {}
 
     @property
     @lru_cache
-    def dependencies(self) -> Dict[str, Build]:
+    def dependencies(self) -> dict[str, Build]:
         return {}
 
-    def build(self):
+    def build(self) -> NoReturn:
         raise RuntimeError(
             "NVCC is not found. Please manually install CUDA"
             "Toolkit and cuDNN!\n"
@@ -536,7 +537,7 @@ class BuildCUDA(Build):
 
     @property
     @lru_cache
-    def cuda_compute_capabilities(self):
+    def cuda_compute_capabilities(self) -> str:
         """Get cuda compute capabilities."""
         cuda_version = tuple(map(int, self.cuda_version.split(".")))
         if (10, 0, 0) <= cuda_version < (11, 0, 0):
@@ -554,15 +555,15 @@ class BuildROCM(Build):
 
     @property
     @lru_cache
-    def resources(self) -> Dict[str, OnlineResource]:
+    def resources(self) -> dict[str, OnlineResource]:
         return {}
 
     @property
     @lru_cache
-    def dependencies(self) -> Dict[str, Build]:
+    def dependencies(self) -> dict[str, Build]:
         return {}
 
-    def build(self):
+    def build(self) -> NoReturn:
         raise RuntimeError("ROCm is not found!")
 
     @property
@@ -599,14 +600,14 @@ class BuildTensorFlow(Build):
 
     @property
     @lru_cache
-    def resources(self) -> Dict[str, OnlineResource]:
+    def resources(self) -> dict[str, OnlineResource]:
         return {
             "tensorflow": RESOURCES["tensorflow-" + self.version],
         }
 
     @property
     @lru_cache
-    def dependencies(self) -> Dict[str, Build]:
+    def dependencies(self) -> dict[str, Build]:
         optional_dep = {}
         if self.enable_cuda:
             optional_dep["cuda"] = BuildCUDA()
@@ -618,7 +619,7 @@ class BuildTensorFlow(Build):
             **optional_dep,
         }
 
-    def build(self):
+    def build(self) -> None:
         tf_res = self.resources["tensorflow"]
         src = tf_res.gzip_path / (f"tensorflow-{self.version}")
         with set_directory(src):
@@ -720,7 +721,7 @@ class BuildTensorFlow(Build):
         self.copy_lib("libtensorflow_framework" + ext, lib_src, lib_dst)
         self.copy_lib("libtensorflow_cc" + ext, lib_src, lib_dst)
 
-    def copy_lib(self, libname, src, dst):
+    def copy_lib(self, libname, src, dst) -> None:
         """Copy library and make symlink."""
         copy3(src / (libname + "." + self.version), dst)
         libname_v = libname + "." + self.version
@@ -778,19 +779,19 @@ class BuildTensorFlow(Build):
         }
 
     @property
-    def _build_targets(self) -> List[str]:
+    def _build_targets(self) -> list[str]:
         # C++ interface
         return ["//tensorflow:libtensorflow_cc" + get_shlib_ext()]
 
     @property
-    def _build_opts(self) -> List[str]:
+    def _build_opts(self) -> list[str]:
         opts = [
             "--logging=6",
             "--verbose_failures",
             "--config=opt",
             "--config=noaws",
             "--copt=-mtune=generic",
-            "--local_cpu_resources=%d" % CPU_COUNT,
+            f"--local_cpu_resources={CPU_COUNT}",
         ]
         if self.enable_mkl:
             # enable oneDNN
@@ -798,7 +799,7 @@ class BuildTensorFlow(Build):
         return opts
 
     @property
-    def _bazel_opts(self) -> List[str]:
+    def _bazel_opts(self) -> list[str]:
         return []
 
     @property
@@ -808,7 +809,7 @@ class BuildTensorFlow(Build):
         ).exists()
 
 
-def clean_package():
+def clean_package() -> None:
     """Clean the unused files."""
     clean_files = [
         PACKAGE_DIR,
@@ -826,7 +827,7 @@ def clean_package():
 # interface
 
 
-def env() -> Dict[str, str]:
+def env() -> dict[str, str]:
     return {
         "Python": sys.executable,
         "CUDA": CUDA_PATH,
@@ -855,12 +856,12 @@ class RawTextArgumentDefaultsHelpFormatter(
     pass
 
 
-def parse_args(args: Optional[List[str]] = None):
+def parse_args(args: Optional[list[str]] = None):
     """TensorFlow C++ Library Installer commandline options argument parser.
 
     Parameters
     ----------
-    args : List[str]
+    args : list[str]
         list of command line arguments, main purpose is testing default option None
         takes arguments from sys.argv
     """

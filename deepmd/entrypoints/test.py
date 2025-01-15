@@ -7,10 +7,7 @@ from pathlib import (
 )
 from typing import (
     TYPE_CHECKING,
-    Dict,
-    List,
     Optional,
-    Tuple,
 )
 
 import numpy as np
@@ -33,6 +30,9 @@ from deepmd.infer.deep_polar import (
 )
 from deepmd.infer.deep_pot import (
     DeepPot,
+)
+from deepmd.infer.deep_property import (
+    DeepProperty,
 )
 from deepmd.infer.deep_wfc import (
     DeepWFC,
@@ -67,7 +67,7 @@ def test(
     atomic: bool,
     head: Optional[str] = None,
     **kwargs,
-):
+) -> None:
     """Test model predictions.
 
     Parameters
@@ -124,7 +124,7 @@ def test(
         log.info(f"# testing system : {system}")
 
         # create data class
-        tmap = dp.get_type_map() if isinstance(dp, DeepPot) else None
+        tmap = dp.get_type_map()
         data = DeepmdData(
             system,
             set_prefix="set",
@@ -153,6 +153,16 @@ def test(
                 atomic,
                 append_detail=(cc != 0),
             )
+        elif isinstance(dp, DeepProperty):
+            err = test_property(
+                dp,
+                data,
+                system,
+                numb_test,
+                detail_file,
+                atomic,
+                append_detail=(cc != 0),
+            )
         elif isinstance(dp, DeepDipole):
             err = test_dipole(dp, data, numb_test, detail_file, atomic)
         elif isinstance(dp, DeepPolar):
@@ -172,22 +182,23 @@ def test(
     if len(all_sys) != len(err_coll):
         log.warning("Not all systems are tested! Check if the systems are valid")
 
-    if len(all_sys) > 1:
-        log.info("# ----------weighted average of errors----------- ")
-        log.info(f"# number of systems : {len(all_sys)}")
-        if isinstance(dp, DeepPot):
-            print_ener_sys_avg(avg_err)
-        elif isinstance(dp, DeepDOS):
-            print_dos_sys_avg(avg_err)
-        elif isinstance(dp, DeepDipole):
-            print_dipole_sys_avg(avg_err)
-        elif isinstance(dp, DeepPolar):
-            print_polar_sys_avg(avg_err)
-        elif isinstance(dp, DeepGlobalPolar):
-            print_polar_sys_avg(avg_err)
-        elif isinstance(dp, DeepGlobalPolar):
-            print_wfc_sys_avg(avg_err)
-        log.info("# ----------------------------------------------- ")
+    log.info("# ----------weighted average of errors----------- ")
+    log.info(f"# number of systems : {len(all_sys)}")
+    if isinstance(dp, DeepPot):
+        print_ener_sys_avg(avg_err)
+    elif isinstance(dp, DeepDOS):
+        print_dos_sys_avg(avg_err)
+    elif isinstance(dp, DeepProperty):
+        print_property_sys_avg(avg_err)
+    elif isinstance(dp, DeepDipole):
+        print_dipole_sys_avg(avg_err)
+    elif isinstance(dp, DeepPolar):
+        print_polar_sys_avg(avg_err)
+    elif isinstance(dp, DeepGlobalPolar):
+        print_polar_sys_avg(avg_err)
+    elif isinstance(dp, DeepWFC):
+        print_wfc_sys_avg(avg_err)
+    log.info("# ----------------------------------------------- ")
 
 
 def mae(diff: np.ndarray) -> float:
@@ -224,7 +235,7 @@ def rmse(diff: np.ndarray) -> float:
 
 def save_txt_file(
     fname: Path, data: np.ndarray, header: str = "", append: bool = False
-):
+) -> None:
     """Save numpy array to test file.
 
     Parameters
@@ -236,7 +247,7 @@ def save_txt_file(
     header : str, optional
         header string to use in file, by default ""
     append : bool, optional
-        if true file will be appended insted of overwriting, by default False
+        if true file will be appended instead of overwriting, by default False
     """
     flags = "ab" if append else "w"
     with fname.open(flags) as fp:
@@ -251,7 +262,7 @@ def test_ener(
     detail_file: Optional[str],
     has_atom_ener: bool,
     append_detail: bool = False,
-) -> Tuple[List[np.ndarray], List[int]]:
+) -> tuple[list[np.ndarray], list[int]]:
     """Test energy type model.
 
     Parameters
@@ -273,7 +284,7 @@ def test_ener(
 
     Returns
     -------
-    Tuple[List[np.ndarray], List[int]]
+    tuple[list[np.ndarray], list[int]]
         arrays with results and their shapes
     """
     data.add("energy", 1, atomic=False, must=False, high_prec=True)
@@ -549,7 +560,7 @@ def test_ener(
         }
 
 
-def print_ener_sys_avg(avg: Dict[str, float]):
+def print_ener_sys_avg(avg: dict[str, float]) -> None:
     """Print errors summary for energy type potential.
 
     Parameters
@@ -583,7 +594,7 @@ def test_dos(
     detail_file: Optional[str],
     has_atom_dos: bool,
     append_detail: bool = False,
-) -> Tuple[List[np.ndarray], List[int]]:
+) -> tuple[list[np.ndarray], list[int]]:
     """Test DOS type model.
 
     Parameters
@@ -605,7 +616,7 @@ def test_dos(
 
     Returns
     -------
-    Tuple[List[np.ndarray], List[int]]
+    tuple[list[np.ndarray], list[int]]
         arrays with results and their shapes
     """
     data.add("dos", dp.numb_dos, atomic=False, must=True, high_prec=True)
@@ -693,9 +704,9 @@ def test_dos(
             frame_output = np.hstack((test_out, pred_out))
 
             save_txt_file(
-                detail_path.with_suffix(".dos.out.%.d" % ii),
+                detail_path.with_suffix(f".dos.out.{ii}"),
                 frame_output,
-                header="%s - %.d: data_dos pred_dos" % (system, ii),
+                header=f"{system} - {ii}: data_dos pred_dos",
                 append=append_detail,
             )
 
@@ -707,9 +718,9 @@ def test_dos(
                 frame_output = np.hstack((test_out, pred_out))
 
                 save_txt_file(
-                    detail_path.with_suffix(".ados.out.%.d" % ii),
+                    detail_path.with_suffix(f".ados.out.{ii}"),
                     frame_output,
-                    header="%s - %.d: data_ados pred_ados" % (system, ii),
+                    header=f"{system} - {ii}: data_ados pred_ados",
                     append=append_detail,
                 )
 
@@ -721,7 +732,7 @@ def test_dos(
     }
 
 
-def print_dos_sys_avg(avg: Dict[str, float]):
+def print_dos_sys_avg(avg: dict[str, float]) -> None:
     """Print errors summary for DOS type potential.
 
     Parameters
@@ -733,6 +744,166 @@ def print_dos_sys_avg(avg: Dict[str, float]):
     log.info(f"DOS RMSE           : {avg['rmse_dos']:e} Occupation/eV")
     log.info(f"DOS MAE/Natoms     : {avg['mae_dosa']:e} Occupation/eV")
     log.info(f"DOS RMSE/Natoms    : {avg['rmse_dosa']:e} Occupation/eV")
+
+
+def test_property(
+    dp: "DeepProperty",
+    data: DeepmdData,
+    system: str,
+    numb_test: int,
+    detail_file: Optional[str],
+    has_atom_property: bool,
+    append_detail: bool = False,
+) -> tuple[list[np.ndarray], list[int]]:
+    """Test Property type model.
+
+    Parameters
+    ----------
+    dp : DeepProperty
+        instance of deep potential
+    data : DeepmdData
+        data container object
+    system : str
+        system directory
+    numb_test : int
+        munber of tests to do
+    detail_file : Optional[str]
+        file where test details will be output
+    has_atom_property : bool
+        whether per atom quantities should be computed
+    append_detail : bool, optional
+        if true append output detail file, by default False
+
+    Returns
+    -------
+    tuple[list[np.ndarray], list[int]]
+        arrays with results and their shapes
+    """
+    var_name = dp.get_var_name()
+    assert isinstance(var_name, str)
+    data.add(var_name, dp.task_dim, atomic=False, must=True, high_prec=True)
+    if has_atom_property:
+        data.add(
+            f"atom_{var_name}",
+            dp.task_dim,
+            atomic=True,
+            must=False,
+            high_prec=True,
+        )
+
+    if dp.get_dim_fparam() > 0:
+        data.add(
+            "fparam", dp.get_dim_fparam(), atomic=False, must=True, high_prec=False
+        )
+    if dp.get_dim_aparam() > 0:
+        data.add("aparam", dp.get_dim_aparam(), atomic=True, must=True, high_prec=False)
+
+    test_data = data.get_test()
+    mixed_type = data.mixed_type
+    natoms = len(test_data["type"][0])
+    nframes = test_data["box"].shape[0]
+    numb_test = min(nframes, numb_test)
+
+    coord = test_data["coord"][:numb_test].reshape([numb_test, -1])
+    box = test_data["box"][:numb_test]
+
+    if not data.pbc:
+        box = None
+    if mixed_type:
+        atype = test_data["type"][:numb_test].reshape([numb_test, -1])
+    else:
+        atype = test_data["type"][0]
+    if dp.get_dim_fparam() > 0:
+        fparam = test_data["fparam"][:numb_test]
+    else:
+        fparam = None
+    if dp.get_dim_aparam() > 0:
+        aparam = test_data["aparam"][:numb_test]
+    else:
+        aparam = None
+
+    ret = dp.eval(
+        coord,
+        box,
+        atype,
+        fparam=fparam,
+        aparam=aparam,
+        atomic=has_atom_property,
+        mixed_type=mixed_type,
+    )
+
+    property = ret[0]
+
+    property = property.reshape([numb_test, dp.task_dim])
+
+    if has_atom_property:
+        aproperty = ret[1]
+        aproperty = aproperty.reshape([numb_test, natoms * dp.task_dim])
+
+    diff_property = property - test_data[var_name][:numb_test]
+    mae_property = mae(diff_property)
+    rmse_property = rmse(diff_property)
+
+    if has_atom_property:
+        diff_aproperty = aproperty - test_data[f"atom_{var_name}"][:numb_test]
+        mae_aproperty = mae(diff_aproperty)
+        rmse_aproperty = rmse(diff_aproperty)
+
+    log.info(f"# number of test data : {numb_test:d} ")
+
+    log.info(f"PROPERTY MAE            : {mae_property:e} units")
+    log.info(f"PROPERTY RMSE           : {rmse_property:e} units")
+
+    if has_atom_property:
+        log.info(f"Atomic PROPERTY MAE     : {mae_aproperty:e} units")
+        log.info(f"Atomic PROPERTY RMSE    : {rmse_aproperty:e} units")
+
+    if detail_file is not None:
+        detail_path = Path(detail_file)
+
+        for ii in range(numb_test):
+            test_out = test_data[var_name][ii].reshape(-1, 1)
+            pred_out = property[ii].reshape(-1, 1)
+
+            frame_output = np.hstack((test_out, pred_out))
+
+            save_txt_file(
+                detail_path.with_suffix(f".property.out.{ii}"),
+                frame_output,
+                header=f"{system} - {ii}: data_property pred_property",
+                append=append_detail,
+            )
+
+        if has_atom_property:
+            for ii in range(numb_test):
+                test_out = test_data[f"atom_{var_name}"][ii].reshape(-1, 1)
+                pred_out = aproperty[ii].reshape(-1, 1)
+
+                frame_output = np.hstack((test_out, pred_out))
+
+                save_txt_file(
+                    detail_path.with_suffix(f".aproperty.out.{ii}"),
+                    frame_output,
+                    header=f"{system} - {ii}: data_aproperty pred_aproperty",
+                    append=append_detail,
+                )
+
+    return {
+        "mae_property": (mae_property, property.size),
+        "rmse_property": (rmse_property, property.size),
+    }
+
+
+def print_property_sys_avg(avg: dict[str, float]) -> None:
+    """Print errors summary for Property type potential.
+
+    Parameters
+    ----------
+    avg : np.ndarray
+        array with summaries
+    """
+    log.info(f"PROPERTY MAE            : {avg['mae_property']:e} units")
+    log.info(f"PROPERTY RMSE           : {avg['rmse_property']:e} units")
 
 
 def run_test(dp: "DeepTensor", test_data: dict, numb_test: int, test_sys: DeepmdData):
@@ -773,7 +944,7 @@ def test_wfc(
     data: DeepmdData,
     numb_test: int,
     detail_file: Optional[str],
-) -> Tuple[List[np.ndarray], List[int]]:
+) -> tuple[list[np.ndarray], list[int]]:
     """Test energy type model.
 
     Parameters
@@ -789,7 +960,7 @@ def test_wfc(
 
     Returns
     -------
-    Tuple[List[np.ndarray], List[int]]
+    tuple[list[np.ndarray], list[int]]
         arrays with results and their shapes
     """
     data.add(
@@ -819,7 +990,7 @@ def test_wfc(
     return {"rmse": (rmse_f, wfc.size)}
 
 
-def print_wfc_sys_avg(avg):
+def print_wfc_sys_avg(avg) -> None:
     """Print errors summary for wfc type potential.
 
     Parameters
@@ -837,7 +1008,7 @@ def test_polar(
     detail_file: Optional[str],
     *,
     atomic: bool,
-) -> Tuple[List[np.ndarray], List[int]]:
+) -> tuple[list[np.ndarray], list[int]]:
     """Test energy type model.
 
     Parameters
@@ -851,11 +1022,11 @@ def test_polar(
     detail_file : Optional[str]
         file where test details will be output
     atomic : bool
-        wheter to use glovbal version of polar potential
+        whether to use glovbal version of polar potential
 
     Returns
     -------
-    Tuple[List[np.ndarray], List[int]]
+    tuple[list[np.ndarray], list[int]]
         arrays with results and their shapes
     """
     data.add(
@@ -961,7 +1132,7 @@ def test_polar(
     return {"rmse": (rmse_f, polar.size)}
 
 
-def print_polar_sys_avg(avg):
+def print_polar_sys_avg(avg) -> None:
     """Print errors summary for polar type potential.
 
     Parameters
@@ -978,7 +1149,7 @@ def test_dipole(
     numb_test: int,
     detail_file: Optional[str],
     atomic: bool,
-) -> Tuple[List[np.ndarray], List[int]]:
+) -> tuple[list[np.ndarray], list[int]]:
     """Test energy type model.
 
     Parameters
@@ -996,7 +1167,7 @@ def test_dipole(
 
     Returns
     -------
-    Tuple[List[np.ndarray], List[int]]
+    tuple[list[np.ndarray], list[int]]
         arrays with results and their shapes
     """
     data.add(
@@ -1075,7 +1246,7 @@ def test_dipole(
     return {"rmse": (rmse_f, dipole.size)}
 
 
-def print_dipole_sys_avg(avg):
+def print_dipole_sys_avg(avg) -> None:
     """Print errors summary for dipole type potential.
 
     Parameters

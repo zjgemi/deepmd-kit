@@ -6,8 +6,7 @@ from abc import (
 )
 from typing import (
     Callable,
-    Dict,
-    List,
+    NoReturn,
     Optional,
     Union,
 )
@@ -57,7 +56,7 @@ class DescriptorBlock(ABC, make_plugin_registry("DescriptorBlock")):
         pass
 
     @abstractmethod
-    def get_sel(self) -> List[int]:
+    def get_sel(self) -> list[int]:
         """Returns the number of selected atoms for each type."""
         pass
 
@@ -83,19 +82,19 @@ class DescriptorBlock(ABC, make_plugin_registry("DescriptorBlock")):
 
     def compute_input_stats(
         self,
-        merged: Union[Callable[[], List[dict]], List[dict]],
+        merged: Union[Callable[[], list[dict]], list[dict]],
         path: Optional[DPPath] = None,
-    ):
+    ) -> NoReturn:
         """
         Compute the input statistics (e.g. mean and stddev) for the descriptors from packed data.
 
         Parameters
         ----------
-        merged : Union[Callable[[], List[dict]], List[dict]]
-            - List[dict]: A list of data samples from various data systems.
+        merged : Union[Callable[[], list[dict]], list[dict]]
+            - list[dict]: A list of data samples from various data systems.
                 Each element, `merged[i]`, is a data dictionary containing `keys`: `torch.Tensor`
                 originating from the `i`-th data system.
-            - Callable[[], List[dict]]: A lazy function that returns data samples in the above format
+            - Callable[[], list[dict]]: A lazy function that returns data samples in the above format
                 only when needed. Since the sampling process can be slow and memory-intensive,
                 the lazy function helps by only sampling once.
         path : Optional[DPPath]
@@ -104,15 +103,15 @@ class DescriptorBlock(ABC, make_plugin_registry("DescriptorBlock")):
         """
         raise NotImplementedError
 
-    def get_stats(self) -> Dict[str, StatItem]:
+    def get_stats(self) -> dict[str, StatItem]:
         """Get the statistics of the descriptor."""
         raise NotImplementedError
 
-    def share_params(self, base_class, shared_level, resume=False):
+    def share_params(self, base_class, shared_level, resume=False) -> NoReturn:
         """
         Share the parameters of self to the base_class with shared_level during multitask training.
         If not start from checkpoint (resume is False),
-        some seperated parameters (e.g. mean and stddev) will be re-calculated across different classes.
+        some separated parameters (e.g. mean and stddev) will be re-calculated across different classes.
         """
         raise NotImplementedError
 
@@ -124,6 +123,7 @@ class DescriptorBlock(ABC, make_plugin_registry("DescriptorBlock")):
         extended_atype: np.ndarray,
         extended_atype_embd: Optional[np.ndarray] = None,
         mapping: Optional[np.ndarray] = None,
+        type_embedding: Optional[np.ndarray] = None,
     ):
         """Calculate DescriptorBlock."""
         pass
@@ -137,7 +137,7 @@ class DescriptorBlock(ABC, make_plugin_registry("DescriptorBlock")):
         """Returns whether the descriptor block needs sorted nlist when using `forward_lower`."""
 
 
-def extend_descrpt_stat(des, type_map, des_with_stat=None):
+def extend_descrpt_stat(des, type_map, des_with_stat=None) -> None:
     r"""
     Extend the statistics of a descriptor block with types from newly provided `type_map`.
 
@@ -152,7 +152,7 @@ def extend_descrpt_stat(des, type_map, des_with_stat=None):
     ----------
     des : DescriptorBlock
         The descriptor block to be extended.
-    type_map : List[str]
+    type_map : list[str]
         The name of each type of atoms to be extended.
     des_with_stat : DescriptorBlock, Optional
         The descriptor block has additional statistics of types from newly provided `type_map`.

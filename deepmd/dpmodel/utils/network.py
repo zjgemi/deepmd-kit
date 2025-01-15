@@ -4,23 +4,27 @@
 See issue #2982 for more information.
 """
 
-import copy
 import itertools
 from typing import (
     Callable,
     ClassVar,
-    Dict,
-    List,
     Optional,
     Union,
 )
 
+import array_api_compat
 import numpy as np
 
 from deepmd.dpmodel import (
     DEFAULT_PRECISION,
     PRECISION_DICT,
     NativeOP,
+)
+from deepmd.dpmodel.array_api import (
+    support_array_api,
+)
+from deepmd.dpmodel.common import (
+    to_numpy_array,
 )
 from deepmd.dpmodel.utils.seed import (
     child_seed,
@@ -31,7 +35,7 @@ from deepmd.utils.version import (
 
 
 class Identity(NativeOP):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def call(self, x: np.ndarray) -> np.ndarray:
@@ -79,7 +83,7 @@ class NativeLayer(NativeOP):
         activation_function: Optional[str] = None,
         resnet: bool = False,
         precision: str = DEFAULT_PRECISION,
-        seed: Optional[Union[int, List[int]]] = None,
+        seed: Optional[Union[int, list[int]]] = None,
     ) -> None:
         prec = PRECISION_DICT[precision.lower()]
         self.precision = precision
@@ -105,9 +109,9 @@ class NativeLayer(NativeOP):
             The serialized layer.
         """
         data = {
-            "w": self.w,
-            "b": self.b,
-            "idt": self.idt,
+            "w": to_numpy_array(self.w),
+            "b": to_numpy_array(self.b),
+            "idt": to_numpy_array(self.idt),
         }
         return {
             "@class": "Layer",
@@ -130,7 +134,7 @@ class NativeLayer(NativeOP):
         data : dict
             The dict to deserialize from.
         """
-        data = copy.deepcopy(data)
+        data = data.copy()
         check_version_compatibility(data.pop("@version", 1), 1, 1)
         data.pop("@class", None)
         variables = data.pop("@variables")
@@ -141,19 +145,22 @@ class NativeLayer(NativeOP):
             num_out,
             **data,
         )
-        obj.w, obj.b, obj.idt = (
+        w, b, idt = (
             variables["w"],
             variables.get("b", None),
             variables.get("idt", None),
         )
-        if obj.b is not None:
-            obj.b = obj.b.ravel()
-        if obj.idt is not None:
-            obj.idt = obj.idt.ravel()
+        if b is not None:
+            b = b.ravel()
+        if idt is not None:
+            idt = idt.ravel()
+        obj.w = w
+        obj.b = b
+        obj.idt = idt
         obj.check_shape_consistency()
         return obj
 
-    def check_shape_consistency(self):
+    def check_shape_consistency(self) -> None:
         if self.b is not None and self.w.shape[1] != self.b.shape[0]:
             raise ValueError(
                 f"dim 1 of w {self.w.shape[1]} is not equal to shape "
@@ -165,19 +172,22 @@ class NativeLayer(NativeOP):
                 f"of idt {self.idt.shape[0]}",
             )
 
-    def check_type_consistency(self):
+    def check_type_consistency(self) -> None:
         precision = self.precision
 
-        def check_var(var):
+        def check_var(var) -> None:
             if var is not None:
+                # array api standard doesn't provide a API to get the dtype name
+                # this is really hacked
+                dtype_name = str(var.dtype).split(".")[-1]
                 # assertion "float64" == "double" would fail
-                assert PRECISION_DICT[var.dtype.name] is PRECISION_DICT[precision]
+                assert PRECISION_DICT[dtype_name] is PRECISION_DICT[precision]
 
         check_var(self.w)
         check_var(self.b)
         check_var(self.idt)
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, value) -> None:
         if key in ("w", "matrix"):
             self.w = value
         elif key in ("b", "bias"):
@@ -215,6 +225,7 @@ class NativeLayer(NativeOP):
     def dim_out(self) -> int:
         return self.w.shape[1]
 
+    @support_array_api(version="2022.12")
     def call(self, x: np.ndarray) -> np.ndarray:
         """Forward pass.
 
@@ -230,59 +241,81 @@ class NativeLayer(NativeOP):
         """
         if self.w is None or self.activation_function is None:
             raise ValueError("w, b, and activation_function must be set")
+        xp = array_api_compat.array_namespace(x)
         fn = get_activation_fn(self.activation_function)
         y = (
-            np.matmul(x, self.w) + self.b
+            xp.matmul(x, self.w) + self.b
             if self.b is not None
-            else np.matmul(x, self.w)
+            else xp.matmul(x, self.w)
         )
+        if y.dtype != x.dtype:
+            # workaround for bfloat16
+            # https://github.com/jax-ml/ml_dtypes/issues/235
+            y = xp.astype(y, x.dtype)
         y = fn(y)
         if self.idt is not None:
             y *= self.idt
         if self.resnet and self.w.shape[1] == self.w.shape[0]:
             y += x
         elif self.resnet and self.w.shape[1] == 2 * self.w.shape[0]:
-            y += np.concatenate([x, x], axis=-1)
+            y += xp.concat([x, x], axis=-1)
         return y
 
 
+@support_array_api(version="2022.12")
 def get_activation_fn(activation_function: str) -> Callable[[np.ndarray], np.ndarray]:
     activation_function = activation_function.lower()
     if activation_function == "tanh":
-        return np.tanh
+
+        def fn(x):
+            xp = array_api_compat.array_namespace(x)
+            return xp.tanh(x)
+
+        return fn
     elif activation_function == "relu":
 
         def fn(x):
+            xp = array_api_compat.array_namespace(x)
             # https://stackoverflow.com/a/47936476/9567349
-            return x * (x > 0)
+            return x * xp.astype(x > 0, x.dtype)
 
         return fn
     elif activation_function in ("gelu", "gelu_tf"):
 
         def fn(x):
+            xp = array_api_compat.array_namespace(x)
             # generated by GitHub Copilot
-            return 0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x**3)))
+            return (
+                0.5
+                * x
+                * (1 + xp.tanh(xp.sqrt(xp.asarray(2 / xp.pi)) * (x + 0.044715 * x**3)))
+            )
 
         return fn
     elif activation_function == "relu6":
 
         def fn(x):
+            xp = array_api_compat.array_namespace(x)
             # generated by GitHub Copilot
-            return np.minimum(np.maximum(x, 0), 6)
+            return xp.where(
+                x < 0, xp.full_like(x, 0), xp.where(x > 6, xp.full_like(x, 6), x)
+            )
 
         return fn
     elif activation_function == "softplus":
 
         def fn(x):
+            xp = array_api_compat.array_namespace(x)
             # generated by GitHub Copilot
-            return np.log(1 + np.exp(x))
+            return xp.log(1 + xp.exp(x))
 
         return fn
     elif activation_function == "sigmoid":
 
         def fn(x):
+            xp = array_api_compat.array_namespace(x)
             # generated by GitHub Copilot
-            return 1 / (1 + np.exp(-x))
+            return 1 / (1 + xp.exp(-x))
 
         return fn
     elif activation_function.lower() in ("none", "linear"):
@@ -321,7 +354,7 @@ class LayerNorm(NativeLayer):
         uni_init: bool = True,
         trainable: bool = True,
         precision: str = DEFAULT_PRECISION,
-        seed: Optional[Union[int, List[int]]] = None,
+        seed: Optional[Union[int, list[int]]] = None,
     ) -> None:
         self.eps = eps
         self.uni_init = uni_init
@@ -336,10 +369,11 @@ class LayerNorm(NativeLayer):
             precision=precision,
             seed=seed,
         )
-        self.w = self.w.squeeze(0)  # keep the weight shape to be [num_in]
+        xp = array_api_compat.array_namespace(self.w, self.b)
+        self.w = xp.squeeze(self.w, 0)  # keep the weight shape to be [num_in]
         if self.uni_init:
-            self.w = np.ones_like(self.w)
-            self.b = np.zeros_like(self.b)
+            self.w = xp.ones_like(self.w)
+            self.b = xp.zeros_like(self.b)
         # only to keep consistent with other backends
         self.trainable = trainable
 
@@ -352,8 +386,8 @@ class LayerNorm(NativeLayer):
             The serialized layer.
         """
         data = {
-            "w": self.w,
-            "b": self.b,
+            "w": to_numpy_array(self.w),
+            "b": to_numpy_array(self.b),
         }
         return {
             "@class": "LayerNorm",
@@ -373,7 +407,7 @@ class LayerNorm(NativeLayer):
         data : dict
             The dict to deserialize from.
         """
-        data = copy.deepcopy(data)
+        data = data.copy()
         check_version_compatibility(data.pop("@version", 1), 1, 1)
         data.pop("@class", None)
         variables = data.pop("@variables")
@@ -391,14 +425,14 @@ class LayerNorm(NativeLayer):
         obj._check_shape_consistency()
         return obj
 
-    def _check_shape_consistency(self):
+    def _check_shape_consistency(self) -> None:
         if self.b is not None and self.w.shape[0] != self.b.shape[0]:
             raise ValueError(
                 f"dim 1 of w {self.w.shape[0]} is not equal to shape "
                 f"of b {self.b.shape[0]}",
             )
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, value) -> None:
         if key in ("w", "matrix"):
             self.w = value
         elif key in ("b", "bias"):
@@ -447,11 +481,12 @@ class LayerNorm(NativeLayer):
 
     @staticmethod
     def layer_norm_numpy(x, shape, weight=None, bias=None, eps=1e-5):
+        xp = array_api_compat.array_namespace(x)
         # mean and variance
-        mean = np.mean(x, axis=tuple(range(-len(shape), 0)), keepdims=True)
-        var = np.var(x, axis=tuple(range(-len(shape), 0)), keepdims=True)
+        mean = xp.mean(x, axis=tuple(range(-len(shape), 0)), keepdims=True)
+        var = xp.var(x, axis=tuple(range(-len(shape), 0)), keepdims=True)
         # normalize
-        x_normalized = (x - mean) / np.sqrt(var + eps)
+        x_normalized = (x - mean) / xp.sqrt(var + eps)
         # shift and scale
         if weight is not None and bias is not None:
             x_normalized = x_normalized * weight + bias
@@ -468,7 +503,7 @@ def make_multilayer_network(T_NetworkLayer, ModuleBase):
             The layers of the network.
         """
 
-        def __init__(self, layers: Optional[List[dict]] = None) -> None:
+        def __init__(self, layers: Optional[list[dict]] = None) -> None:
             super().__init__()
             if layers is None:
                 layers = []
@@ -507,11 +542,11 @@ def make_multilayer_network(T_NetworkLayer, ModuleBase):
             assert isinstance(key, int)
             return self.layers[key]
 
-        def __setitem__(self, key, value):
+        def __setitem__(self, key, value) -> None:
             assert isinstance(key, int)
             self.layers[key] = value
 
-        def check_shape_consistency(self):
+        def check_shape_consistency(self) -> None:
             for ii in range(len(self.layers) - 1):
                 if self.layers[ii].dim_out() != self.layers[ii + 1].dim_in():
                     raise ValueError(
@@ -537,14 +572,15 @@ def make_multilayer_network(T_NetworkLayer, ModuleBase):
                 x = layer(x)
             return x
 
-        def clear(self):
+        def clear(self) -> None:
             """Clear the network parameters to zero."""
             for layer in self.layers:
-                layer.w.fill(0.0)
+                xp = array_api_compat.array_namespace(layer.w)
+                layer.w = xp.zeros_like(layer.w)
                 if layer.b is not None:
-                    layer.b.fill(0.0)
+                    layer.b = xp.zeros_like(layer.b)
                 if layer.idt is not None:
-                    layer.idt.fill(0.0)
+                    layer.idt = xp.zeros_like(layer.idt)
 
     return NN
 
@@ -568,7 +604,7 @@ def make_embedding_network(T_Network, T_NetworkLayer):
         resnet_dt
             Use time step at the resnet architecture.
         precision
-            Floating point precision for the model paramters.
+            Floating point precision for the model parameters.
         seed : int, optional
             Random seed.
         bias : bool, Optional
@@ -578,13 +614,13 @@ def make_embedding_network(T_Network, T_NetworkLayer):
         def __init__(
             self,
             in_dim,
-            neuron: List[int] = [24, 48, 96],
+            neuron: list[int] = [24, 48, 96],
             activation_function: str = "tanh",
             resnet_dt: bool = False,
             precision: str = DEFAULT_PRECISION,
-            seed: Optional[Union[int, List[int]]] = None,
+            seed: Optional[Union[int, list[int]]] = None,
             bias: bool = True,
-        ):
+        ) -> None:
             layers = []
             i_in = in_dim
             for idx, ii in enumerate(neuron):
@@ -640,7 +676,7 @@ def make_embedding_network(T_Network, T_NetworkLayer):
             data : dict
                 The dict to deserialize from.
             """
-            data = copy.deepcopy(data)
+            data = data.copy()
             check_version_compatibility(data.pop("@version", 1), 2, 1)
             data.pop("@class", None)
             layers = data.pop("layers")
@@ -672,7 +708,7 @@ def make_fitting_network(T_EmbeddingNet, T_Network, T_NetworkLayer):
         resnet_dt
             Use time step at the resnet architecture.
         precision
-            Floating point precision for the model paramters.
+            Floating point precision for the model parameters.
         bias_out
             The last linear layer has bias.
         seed : int, optional
@@ -683,13 +719,13 @@ def make_fitting_network(T_EmbeddingNet, T_Network, T_NetworkLayer):
             self,
             in_dim,
             out_dim,
-            neuron: List[int] = [24, 48, 96],
+            neuron: list[int] = [24, 48, 96],
             activation_function: str = "tanh",
             resnet_dt: bool = False,
             precision: str = DEFAULT_PRECISION,
             bias_out: bool = True,
-            seed: Optional[Union[int, List[int]]] = None,
-        ):
+            seed: Optional[Union[int, list[int]]] = None,
+        ) -> None:
             super().__init__(
                 in_dim,
                 neuron=neuron,
@@ -745,7 +781,7 @@ def make_fitting_network(T_EmbeddingNet, T_Network, T_NetworkLayer):
             data : dict
                 The dict to deserialize from.
             """
-            data = copy.deepcopy(data)
+            data = data.copy()
             check_version_compatibility(data.pop("@version", 1), 1, 1)
             data.pop("@class", None)
             layers = data.pop("layers")
@@ -762,7 +798,7 @@ FittingNet = make_fitting_network(EmbeddingNet, NativeNet, NativeLayer)
 class NetworkCollection:
     """A collection of networks for multiple elements.
 
-    The number of dimesions for types might be 0, 1, or 2.
+    The number of dimensions for types might be 0, 1, or 2.
     - 0: embedding or fitting with type embedding, in ()
     - 1: embedding with type_one_side, or fitting, in (type_i)
     - 2: embedding without type_one_side, in (type_i, type_j)
@@ -778,7 +814,7 @@ class NetworkCollection:
     """
 
     # subclass may override this
-    NETWORK_TYPE_MAP: ClassVar[Dict[str, type]] = {
+    NETWORK_TYPE_MAP: ClassVar[dict[str, type]] = {
         "network": NativeNet,
         "embedding_network": EmbeddingNet,
         "fitting_network": FittingNet,
@@ -789,8 +825,8 @@ class NetworkCollection:
         ndim: int,
         ntypes: int,
         network_type: str = "network",
-        networks: List[Union[NativeNet, dict]] = [],
-    ):
+        networks: list[Union[NativeNet, dict]] = [],
+    ) -> None:
         self.ndim = ndim
         self.ntypes = ntypes
         self.network_type = self.NETWORK_TYPE_MAP[network_type]
@@ -800,7 +836,7 @@ class NetworkCollection:
         if len(networks):
             self.check_completeness()
 
-    def check_completeness(self):
+    def check_completeness(self) -> None:
         """Check whether the collection is complete.
 
         Raises
@@ -830,7 +866,7 @@ class NetworkCollection:
     def __getitem__(self, key):
         return self._networks[self._convert_key(key)]
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, value) -> None:
         if isinstance(value, self.network_type):
             pass
         elif isinstance(value, dict):

@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-import copy
 from typing import (
     TYPE_CHECKING,
     Any,
-    List,
     Optional,
     Union,
 )
@@ -30,24 +28,25 @@ class EnergyFittingNet(InvarFitting):
         self,
         ntypes: int,
         dim_descrpt: int,
-        neuron: List[int] = [120, 120, 120],
+        neuron: list[int] = [120, 120, 120],
         resnet_dt: bool = True,
         numb_fparam: int = 0,
         numb_aparam: int = 0,
+        dim_case_embd: int = 0,
         rcond: Optional[float] = None,
         tot_ener_zero: bool = False,
-        trainable: Optional[List[bool]] = None,
-        atom_ener: Optional[List[float]] = None,
+        trainable: Optional[list[bool]] = None,
+        atom_ener: Optional[list[float]] = None,
         activation_function: str = "tanh",
         precision: str = DEFAULT_PRECISION,
-        layer_name: Optional[List[Optional[str]]] = None,
+        layer_name: Optional[list[Optional[str]]] = None,
         use_aparam_as_mask: bool = False,
         spin: Any = None,
         mixed_types: bool = False,
-        exclude_types: List[int] = [],
-        type_map: Optional[List[str]] = None,
-        seed: Optional[Union[int, List[int]]] = None,
-    ):
+        exclude_types: list[int] = [],
+        type_map: Optional[list[str]] = None,
+        seed: Optional[Union[int, list[int]]] = None,
+    ) -> None:
         super().__init__(
             var_name="energy",
             ntypes=ntypes,
@@ -57,6 +56,7 @@ class EnergyFittingNet(InvarFitting):
             resnet_dt=resnet_dt,
             numb_fparam=numb_fparam,
             numb_aparam=numb_aparam,
+            dim_case_embd=dim_case_embd,
             rcond=rcond,
             tot_ener_zero=tot_ener_zero,
             trainable=trainable,
@@ -74,8 +74,8 @@ class EnergyFittingNet(InvarFitting):
 
     @classmethod
     def deserialize(cls, data: dict) -> "GeneralFitting":
-        data = copy.deepcopy(data)
-        check_version_compatibility(data.pop("@version", 1), 2, 1)
+        data = data.copy()
+        check_version_compatibility(data.pop("@version", 1), 3, 1)
         data.pop("var_name")
         data.pop("dim_out")
         return super().deserialize(data)

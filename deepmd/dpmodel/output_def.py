@@ -3,17 +3,12 @@ import functools
 from enum import (
     IntEnum,
 )
-from typing import (
-    Dict,
-    List,
-    Tuple,
-)
 
 
 def check_shape(
-    shape: List[int],
-    def_shape: List[int],
-):
+    shape: list[int],
+    def_shape: list[int],
+) -> None:
     """Check if the shape satisfies the defined shape."""
     assert len(shape) == len(def_shape)
     if def_shape[-1] == -1:
@@ -24,7 +19,7 @@ def check_shape(
             raise ValueError(f"{shape} shape not matching def {def_shape}")
 
 
-def check_var(var, var_def):
+def check_var(var, var_def) -> None:
     if var_def.atomic:
         # var.shape == [nf, nloc, *var_def.shape]
         if len(var.shape) != len(var_def.shape) + 2:
@@ -52,7 +47,7 @@ def model_check_output(cls):
             self,
             *args,
             **kwargs,
-        ):
+        ) -> None:
             super().__init__(*args, **kwargs)
             self.md = self.output_def()
 
@@ -94,7 +89,7 @@ def fitting_check_output(cls):
             self,
             *args,
             **kwargs,
-        ):
+        ) -> None:
             super().__init__(*args, **kwargs)
             self.md = self.output_def()
 
@@ -171,7 +166,7 @@ class OutputVariableDef:
     r_differentiable
           If the variable is differentiated with respect to coordinates
           of atoms. Only reducible variable are differentiable.
-          Negative derivative w.r.t. coordinates will be calcualted. (e.g. force)
+          Negative derivative w.r.t. coordinates will be calculated. (e.g. force)
     c_differentiable
           If the variable is differentiated with respect to the
           cell tensor (pbc case). Only reducible variable
@@ -183,15 +178,17 @@ class OutputVariableDef:
     category : int
           The category of the output variable.
     r_hessian : bool
-          If hessian is requred
+          If hessian is required
     magnetic : bool
           If the derivatives of variable have magnetic parts.
+    intensive : bool
+          It indicates whether the fitting property is intensive or extensive.
     """
 
     def __init__(
         self,
         name: str,
-        shape: List[int],
+        shape: list[int],
         reducible: bool = False,
         r_differentiable: bool = False,
         c_differentiable: bool = False,
@@ -199,7 +196,8 @@ class OutputVariableDef:
         category: int = OutputVariableCategory.OUT.value,
         r_hessian: bool = False,
         magnetic: bool = False,
-    ):
+        intensive: bool = False,
+    ) -> None:
         self.name = name
         self.shape = list(shape)
         # jit doesn't support math.prod(self.shape)
@@ -211,13 +209,17 @@ class OutputVariableDef:
         self.reducible = reducible
         self.r_differentiable = r_differentiable
         self.c_differentiable = c_differentiable
+        self.intensive = intensive
         if self.c_differentiable and not self.r_differentiable:
             raise ValueError("c differentiable requires r_differentiable")
         if self.reducible and not self.atomic:
             raise ValueError("a reducible variable should be atomic")
+        if self.intensive and not self.reducible:
+            raise ValueError("an intensive variable should be reducible")
         self.category = category
         self.r_hessian = r_hessian
         self.magnetic = magnetic
+        self.intensive = intensive
         if self.r_hessian:
             if not self.reducible:
                 raise ValueError("only reducible variable can calculate hessian")
@@ -228,7 +230,7 @@ class OutputVariableDef:
     def size(self):
         return self.output_size
 
-    def squeeze(self, dim):
+    def squeeze(self, dim) -> None:
         # squeeze the shape on given dimension
         if -len(self.shape) <= dim < len(self.shape) and self.shape[dim] == 1:
             self.shape.pop(dim)
@@ -249,8 +251,8 @@ class FittingOutputDef:
 
     def __init__(
         self,
-        var_defs: List[OutputVariableDef],
-    ):
+        var_defs: list[OutputVariableDef],
+    ) -> None:
         self.var_defs = {vv.name: vv for vv in var_defs}
 
     def __getitem__(
@@ -259,7 +261,7 @@ class FittingOutputDef:
     ) -> OutputVariableDef:
         return self.var_defs[key]
 
-    def get_data(self) -> Dict[str, OutputVariableDef]:
+    def get_data(self) -> dict[str, OutputVariableDef]:
         return self.var_defs
 
     def keys(self):
@@ -284,14 +286,14 @@ class ModelOutputDef:
     def __init__(
         self,
         fit_defs: FittingOutputDef,
-    ):
+    ) -> None:
         self.def_outp = fit_defs
         self.def_redu = do_reduce(self.def_outp.get_data())
         self.def_derv_r, self.def_derv_c = do_derivative(self.def_outp.get_data())
         self.def_hess_r, _ = do_derivative(self.def_derv_r)
         self.def_derv_c_redu = do_reduce(self.def_derv_c)
         self.def_mask = do_mask(self.def_outp.get_data())
-        self.var_defs: Dict[str, OutputVariableDef] = {}
+        self.var_defs: dict[str, OutputVariableDef] = {}
         for ii in [
             self.def_outp.get_data(),
             self.def_redu,
@@ -311,7 +313,7 @@ class ModelOutputDef:
 
     def get_data(
         self,
-    ) -> Dict[str, OutputVariableDef]:
+    ) -> dict[str, OutputVariableDef]:
         return self.var_defs
 
     def keys(self):
@@ -340,11 +342,11 @@ def get_reduce_name(name: str) -> str:
     return name + "_redu"
 
 
-def get_deriv_name(name: str) -> Tuple[str, str]:
+def get_deriv_name(name: str) -> tuple[str, str]:
     return name + "_derv_r", name + "_derv_c"
 
 
-def get_deriv_name_mag(name: str) -> Tuple[str, str]:
+def get_deriv_name_mag(name: str) -> tuple[str, str]:
     return name + "_derv_r_mag", name + "_derv_c_mag"
 
 
@@ -417,9 +419,9 @@ def check_deriv(var_def: OutputVariableDef) -> bool:
 
 
 def do_reduce(
-    def_outp_data: Dict[str, OutputVariableDef],
-) -> Dict[str, OutputVariableDef]:
-    def_redu: Dict[str, OutputVariableDef] = {}
+    def_outp_data: dict[str, OutputVariableDef],
+) -> dict[str, OutputVariableDef]:
+    def_redu: dict[str, OutputVariableDef] = {}
     for kk, vv in def_outp_data.items():
         if vv.reducible:
             rk = get_reduce_name(kk)
@@ -436,9 +438,9 @@ def do_reduce(
 
 
 def do_mask(
-    def_outp_data: Dict[str, OutputVariableDef],
-) -> Dict[str, OutputVariableDef]:
-    def_mask: Dict[str, OutputVariableDef] = {}
+    def_outp_data: dict[str, OutputVariableDef],
+) -> dict[str, OutputVariableDef]:
+    def_mask: dict[str, OutputVariableDef] = {}
     # for deep eval when has atomic mask
     def_mask["mask"] = OutputVariableDef(
         name="mask",
@@ -461,10 +463,10 @@ def do_mask(
 
 
 def do_derivative(
-    def_outp_data: Dict[str, OutputVariableDef],
-) -> Tuple[Dict[str, OutputVariableDef], Dict[str, OutputVariableDef]]:
-    def_derv_r: Dict[str, OutputVariableDef] = {}
-    def_derv_c: Dict[str, OutputVariableDef] = {}
+    def_outp_data: dict[str, OutputVariableDef],
+) -> tuple[dict[str, OutputVariableDef], dict[str, OutputVariableDef]]:
+    def_derv_r: dict[str, OutputVariableDef] = {}
+    def_derv_c: dict[str, OutputVariableDef] = {}
     for kk, vv in def_outp_data.items():
         rkr, rkc = get_deriv_name(kk)
         rkrm, rkcm = get_deriv_name_mag(kk)

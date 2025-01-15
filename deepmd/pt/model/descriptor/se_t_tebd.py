@@ -1,10 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 from typing import (
     Callable,
-    Dict,
-    List,
     Optional,
-    Tuple,
     Union,
 )
 
@@ -79,7 +76,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
             The cut-off radius
     rcut_smth
             From where the environment matrix should be smoothed
-    sel : Union[List[int], int]
+    sel : Union[list[int], int]
             list[int]: sel[i] specifies the maxmum number of type i atoms in the cut-off radius
             int: the total maxmum number of atoms in the cut-off radius
     ntypes : int
@@ -101,7 +98,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
             The activation function in the embedding net. Supported options are |ACTIVATION_FN|
     env_protection: float
             Protection parameter to prevent division by zero errors during environment matrix calculations.
-    exclude_types : List[Tuple[int, int]]
+    exclude_types : list[tuple[int, int]]
             The excluded pairs of types which have no interaction with each other.
             For example, `[[0, 1]]` means no interaction between type 0 and type 1.
     precision
@@ -110,7 +107,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
             If the weights of embedding net are trainable.
     seed
             Random seed for initializing the network parameters.
-    type_map: List[str], Optional
+    type_map: list[str], Optional
             A list of strings. Give the name to each type of atoms.
     concat_output_tebd: bool
             Whether to concat type embedding at the output of the descriptor.
@@ -127,7 +124,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
         self,
         rcut: float,
         rcut_smth: float,
-        sel: Union[List[int], int],
+        sel: Union[list[int], int],
         ntypes: int,
         neuron: list = [2, 4, 8],
         tebd_dim: int = 8,
@@ -136,16 +133,16 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
         set_davg_zero: bool = True,
         activation_function: str = "tanh",
         env_protection: float = 0.0,
-        exclude_types: List[Tuple[int, int]] = [],
+        exclude_types: list[tuple[int, int]] = [],
         precision: str = "float64",
         trainable: bool = True,
-        seed: Optional[Union[int, List[int]]] = None,
-        type_map: Optional[List[str]] = None,
+        seed: Optional[Union[int, list[int]]] = None,
+        type_map: Optional[list[str]] = None,
         concat_output_tebd: bool = True,
         use_econf_tebd: bool = False,
         use_tebd_bias=False,
         smooth: bool = True,
-    ):
+    ) -> None:
         super().__init__()
         self.se_ttebd = DescrptBlockSeTTebd(
             rcut,
@@ -164,6 +161,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
             smooth=smooth,
             seed=child_seed(seed, 1),
         )
+        self.prec = PRECISION_DICT[precision]
         self.use_econf_tebd = use_econf_tebd
         self.type_map = type_map
         self.smooth = smooth
@@ -177,6 +175,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
             use_tebd_bias=use_tebd_bias,
         )
         self.tebd_dim = tebd_dim
+        self.tebd_input_mode = tebd_input_mode
         self.concat_output_tebd = concat_output_tebd
         self.trainable = trainable
         # set trainable
@@ -195,7 +194,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
         """Returns the number of selected atoms in the cut-off radius."""
         return self.se_ttebd.get_nsel()
 
-    def get_sel(self) -> List[int]:
+    def get_sel(self) -> list[int]:
         """Returns the number of selected atoms for each type."""
         return self.se_ttebd.get_sel()
 
@@ -203,7 +202,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
         """Returns the number of element types."""
         return self.se_ttebd.get_ntypes()
 
-    def get_type_map(self) -> List[str]:
+    def get_type_map(self) -> list[str]:
         """Get the name to each type of atoms."""
         return self.type_map
 
@@ -218,11 +217,11 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
         return self.se_ttebd.dim_emb
 
     def mixed_types(self) -> bool:
-        """If true, the discriptor
+        """If true, the descriptor
         1. assumes total number of atoms aligned across frames;
         2. requires a neighbor list that does not distinguish different atomic types.
 
-        If false, the discriptor
+        If false, the descriptor
         1. assumes total number of atoms of each atom type aligned across frames;
         2. requires a neighbor list that distinguishes different atomic types.
 
@@ -241,11 +240,11 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
         """Returns the protection of building environment matrix."""
         return self.se_ttebd.get_env_protection()
 
-    def share_params(self, base_class, shared_level, resume=False):
+    def share_params(self, base_class, shared_level, resume=False) -> None:
         """
         Share the parameters of self to the base_class with shared_level during multitask training.
         If not start from checkpoint (resume is False),
-        some seperated parameters (e.g. mean and stddev) will be re-calculated across different classes.
+        some separated parameters (e.g. mean and stddev) will be re-calculated across different classes.
         """
         assert (
             self.__class__ == base_class.__class__
@@ -274,7 +273,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
 
     def compute_input_stats(
         self,
-        merged: Union[Callable[[], List[dict]], List[dict]],
+        merged: Union[Callable[[], list[dict]], list[dict]],
         path: Optional[DPPath] = None,
     ):
         """
@@ -282,11 +281,11 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
 
         Parameters
         ----------
-        merged : Union[Callable[[], List[dict]], List[dict]]
-            - List[dict]: A list of data samples from various data systems.
+        merged : Union[Callable[[], list[dict]], list[dict]]
+            - list[dict]: A list of data samples from various data systems.
                 Each element, `merged[i]`, is a data dictionary containing `keys`: `torch.Tensor`
                 originating from the `i`-th data system.
-            - Callable[[], List[dict]]: A lazy function that returns data samples in the above format
+            - Callable[[], list[dict]]: A lazy function that returns data samples in the above format
                 only when needed. Since the sampling process can be slow and memory-intensive,
                 the lazy function helps by only sampling once.
         path : Optional[DPPath]
@@ -304,12 +303,12 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
         self.se_ttebd.mean = mean
         self.se_ttebd.stddev = stddev
 
-    def get_stat_mean_and_stddev(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_stat_mean_and_stddev(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Get mean and stddev for descriptor."""
         return self.se_ttebd.mean, self.se_ttebd.stddev
 
     def change_type_map(
-        self, type_map: List[str], model_with_new_type_stat=None
+        self, type_map: list[str], model_with_new_type_stat=None
     ) -> None:
         """Change the type related params to new ones, according to `type_map` and the original one in the model.
         If there are new types in `type_map`, statistics will be updated accordingly to `model_with_new_type_stat` for these new types.
@@ -410,7 +409,7 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
         extended_atype: torch.Tensor,
         nlist: torch.Tensor,
         mapping: Optional[torch.Tensor] = None,
-        comm_dict: Optional[Dict[str, torch.Tensor]] = None,
+        comm_dict: Optional[dict[str, torch.Tensor]] = None,
     ):
         """Compute the descriptor.
 
@@ -444,36 +443,49 @@ class DescrptSeTTebd(BaseDescriptor, torch.nn.Module):
             The smooth switch function. shape: nf x nloc x nnei
 
         """
+        # cast the input to internal precsion
+        extended_coord = extended_coord.to(dtype=self.prec)
         del mapping
         nframes, nloc, nnei = nlist.shape
         nall = extended_coord.view(nframes, -1).shape[1] // 3
         g1_ext = self.type_embedding(extended_atype)
         g1_inp = g1_ext[:, :nloc, :]
-        g1, g2, h2, rot_mat, sw = self.se_ttebd(
+        if self.tebd_input_mode in ["strip"]:
+            type_embedding = self.type_embedding.get_full_embedding(g1_ext.device)
+        else:
+            type_embedding = None
+        g1, _, _, _, sw = self.se_ttebd(
             nlist,
             extended_coord,
             extended_atype,
             g1_ext,
             mapping=None,
+            type_embedding=type_embedding,
         )
         if self.concat_output_tebd:
             g1 = torch.cat([g1, g1_inp], dim=-1)
 
-        return g1, rot_mat, g2, h2, sw
+        return (
+            g1.to(dtype=env.GLOBAL_PT_FLOAT_PRECISION),
+            None,
+            None,
+            None,
+            sw.to(dtype=env.GLOBAL_PT_FLOAT_PRECISION),
+        )
 
     @classmethod
     def update_sel(
         cls,
         train_data: DeepmdDataSystem,
-        type_map: Optional[List[str]],
+        type_map: Optional[list[str]],
         local_jdata: dict,
-    ) -> Tuple[dict, Optional[float]]:
+    ) -> tuple[dict, Optional[float]]:
         """Update the selection and perform neighbor statistics.
 
         Parameters
         ----------
         train_data : DeepmdDataSystem
-            data used to do neighbor statictics
+            data used to do neighbor statistics
         type_map : list[str], optional
             The name of each type of atoms
         local_jdata : dict
@@ -500,7 +512,7 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         self,
         rcut: float,
         rcut_smth: float,
-        sel: Union[List[int], int],
+        sel: Union[list[int], int],
         ntypes: int,
         neuron: list = [25, 50, 100],
         tebd_dim: int = 8,
@@ -509,14 +521,14 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         activation_function="tanh",
         precision: str = "float64",
         resnet_dt: bool = False,
-        exclude_types: List[Tuple[int, int]] = [],
+        exclude_types: list[tuple[int, int]] = [],
         env_protection: float = 0.0,
         smooth: bool = True,
-        seed: Optional[Union[int, List[int]]] = None,
-    ):
+        seed: Optional[Union[int, list[int]]] = None,
+    ) -> None:
         super().__init__()
-        self.rcut = rcut
-        self.rcut_smth = rcut_smth
+        self.rcut = float(rcut)
+        self.rcut_smth = float(rcut_smth)
         self.neuron = neuron
         self.filter_neuron = self.neuron
         self.tebd_dim = tebd_dim
@@ -543,12 +555,8 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         self.reinit_exclude(exclude_types)
 
         wanted_shape = (self.ntypes, self.nnei, 4)
-        mean = torch.zeros(
-            wanted_shape, dtype=env.GLOBAL_PT_FLOAT_PRECISION, device=env.DEVICE
-        )
-        stddev = torch.ones(
-            wanted_shape, dtype=env.GLOBAL_PT_FLOAT_PRECISION, device=env.DEVICE
-        )
+        mean = torch.zeros(wanted_shape, dtype=self.prec, device=env.DEVICE)
+        stddev = torch.ones(wanted_shape, dtype=self.prec, device=env.DEVICE)
         self.register_buffer("mean", mean)
         self.register_buffer("stddev", stddev)
         self.tebd_dim_input = self.tebd_dim * 2
@@ -598,7 +606,7 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         """Returns the number of selected atoms in the cut-off radius."""
         return sum(self.sel)
 
-    def get_sel(self) -> List[int]:
+    def get_sel(self) -> list[int]:
         """Returns the number of selected atoms for each type."""
         return self.sel
 
@@ -618,7 +626,7 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         """Returns the output dimension of embedding."""
         return self.filter_neuron[-1]
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, value) -> None:
         if key in ("avg", "data_avg", "davg"):
             self.mean = value
         elif key in ("std", "data_std", "dstd"):
@@ -635,11 +643,11 @@ class DescrptBlockSeTTebd(DescriptorBlock):
             raise KeyError(key)
 
     def mixed_types(self) -> bool:
-        """If true, the discriptor
+        """If true, the descriptor
         1. assumes total number of atoms aligned across frames;
         2. requires a neighbor list that does not distinguish different atomic types.
 
-        If false, the discriptor
+        If false, the descriptor
         1. assumes total number of atoms of each atom type aligned across frames;
         2. requires a neighbor list that distinguishes different atomic types.
 
@@ -667,19 +675,19 @@ class DescrptBlockSeTTebd(DescriptorBlock):
 
     def compute_input_stats(
         self,
-        merged: Union[Callable[[], List[dict]], List[dict]],
+        merged: Union[Callable[[], list[dict]], list[dict]],
         path: Optional[DPPath] = None,
-    ):
+    ) -> None:
         """
         Compute the input statistics (e.g. mean and stddev) for the descriptors from packed data.
 
         Parameters
         ----------
-        merged : Union[Callable[[], List[dict]], List[dict]]
-            - List[dict]: A list of data samples from various data systems.
+        merged : Union[Callable[[], list[dict]], list[dict]]
+            - list[dict]: A list of data samples from various data systems.
                 Each element, `merged[i]`, is a data dictionary containing `keys`: `torch.Tensor`
                 originating from the `i`-th data system.
-            - Callable[[], List[dict]]: A lazy function that returns data samples in the above format
+            - Callable[[], list[dict]]: A lazy function that returns data samples in the above format
                 only when needed. Since the sampling process can be slow and memory-intensive,
                 the lazy function helps by only sampling once.
         path : Optional[DPPath]
@@ -701,10 +709,14 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         self.stats = env_mat_stat.stats
         mean, stddev = env_mat_stat()
         if not self.set_davg_zero:
-            self.mean.copy_(torch.tensor(mean, device=env.DEVICE))  # pylint: disable=no-explicit-dtype
-        self.stddev.copy_(torch.tensor(stddev, device=env.DEVICE))  # pylint: disable=no-explicit-dtype
+            self.mean.copy_(
+                torch.tensor(mean, device=env.DEVICE, dtype=self.mean.dtype)
+            )
+        self.stddev.copy_(
+            torch.tensor(stddev, device=env.DEVICE, dtype=self.stddev.dtype)
+        )
 
-    def get_stats(self) -> Dict[str, StatItem]:
+    def get_stats(self) -> dict[str, StatItem]:
         """Get the statistics of the descriptor."""
         if self.stats is None:
             raise RuntimeError(
@@ -714,8 +726,8 @@ class DescrptBlockSeTTebd(DescriptorBlock):
 
     def reinit_exclude(
         self,
-        exclude_types: List[Tuple[int, int]] = [],
-    ):
+        exclude_types: list[tuple[int, int]] = [],
+    ) -> None:
         self.exclude_types = exclude_types
         self.emask = PairExcludeMask(self.ntypes, exclude_types=exclude_types)
 
@@ -726,6 +738,7 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         extended_atype: torch.Tensor,
         extended_atype_embd: Optional[torch.Tensor] = None,
         mapping: Optional[torch.Tensor] = None,
+        type_embedding: Optional[torch.Tensor] = None,
     ):
         """Compute the descriptor.
 
@@ -741,6 +754,9 @@ class DescrptBlockSeTTebd(DescriptorBlock):
             The extended type embedding of atoms. shape: nf x nall
         mapping
             The index mapping, not required by this descriptor.
+        type_embedding
+            Full type embeddings. shape: (ntypes+1) x nt
+            Required for stripped type embeddings.
 
         Returns
         -------
@@ -783,13 +799,6 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         sw = torch.squeeze(sw, -1)
         # nf x nall x nt
         nt = extended_atype_embd.shape[-1]
-        atype_tebd_ext = extended_atype_embd
-        # nb x (nloc x nnei) x nt
-        index = nlist.reshape(nb, nloc * nnei).unsqueeze(-1).expand(-1, -1, nt)
-        # nb x (nloc x nnei) x nt
-        atype_tebd_nlist = torch.gather(atype_tebd_ext, dim=1, index=index)
-        # nb x nloc x nnei x nt
-        atype_tebd_nlist = atype_tebd_nlist.view(nb, nloc, nnei, nt)
         # beyond the cutoff sw should be 0.0
         sw = sw.masked_fill(~nlist_mask, 0.0)
         # (nb x nloc) x nnei
@@ -810,15 +819,19 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         env_ij = torch.einsum("ijm,ikm->ijk", rr_i, rr_j)
         # nfnl x nt_i x nt_j x 1
         ss = env_ij.unsqueeze(-1)
-
-        # nfnl x nnei x tebd_dim
-        nlist_tebd = atype_tebd_nlist.reshape(nfnl, nnei, self.tebd_dim)
-
-        # nfnl x nt_i x nt_j x tebd_dim
-        nlist_tebd_i = nlist_tebd.unsqueeze(2).expand([-1, -1, self.nnei, -1])
-        nlist_tebd_j = nlist_tebd.unsqueeze(1).expand([-1, self.nnei, -1, -1])
-
         if self.tebd_input_mode in ["concat"]:
+            atype_tebd_ext = extended_atype_embd
+            # nb x (nloc x nnei) x nt
+            index = nlist.reshape(nb, nloc * nnei).unsqueeze(-1).expand(-1, -1, nt)
+            # nb x (nloc x nnei) x nt
+            atype_tebd_nlist = torch.gather(atype_tebd_ext, dim=1, index=index)
+            # nb x nloc x nnei x nt
+            atype_tebd_nlist = atype_tebd_nlist.view(nb, nloc, nnei, nt)
+            # nfnl x nnei x tebd_dim
+            nlist_tebd = atype_tebd_nlist.reshape(nfnl, nnei, self.tebd_dim)
+            # nfnl x nt_i x nt_j x tebd_dim
+            nlist_tebd_i = nlist_tebd.unsqueeze(2).expand([-1, -1, self.nnei, -1])
+            nlist_tebd_j = nlist_tebd.unsqueeze(1).expand([-1, self.nnei, -1, -1])
             # nfnl x nt_i x nt_j x (1 + tebd_dim * 2)
             ss = torch.concat([ss, nlist_tebd_i, nlist_tebd_j], dim=-1)
             # nfnl x nt_i x nt_j x ng
@@ -827,10 +840,47 @@ class DescrptBlockSeTTebd(DescriptorBlock):
             # nfnl x nt_i x nt_j x ng
             gg_s = self.filter_layers.networks[0](ss)
             assert self.filter_layers_strip is not None
-            # nfnl x nt_i x nt_j x (tebd_dim * 2)
-            tt = torch.concat([nlist_tebd_i, nlist_tebd_j], dim=-1)
-            # nfnl x nt_i x nt_j x ng
-            gg_t = self.filter_layers_strip.networks[0](tt)
+            assert type_embedding is not None
+            ng = self.filter_neuron[-1]
+            ntypes_with_padding = type_embedding.shape[0]
+            # nf x (nl x nnei)
+            nlist_index = nlist.reshape(nb, nloc * nnei)
+            # nf x (nl x nnei)
+            nei_type = torch.gather(extended_atype, dim=1, index=nlist_index)
+            # nfnl x nnei
+            nei_type = nei_type.reshape(nfnl, nnei)
+            # nfnl x nnei x nnei
+            nei_type_i = nei_type.unsqueeze(2).expand([-1, -1, nnei])
+            nei_type_j = nei_type.unsqueeze(1).expand([-1, nnei, -1])
+            idx_i = nei_type_i * ntypes_with_padding
+            idx_j = nei_type_j
+            # (nf x nl x nt_i x nt_j) x ng
+            idx = (
+                (idx_i + idx_j)
+                .view(-1, 1)
+                .expand(-1, ng)
+                .type(torch.long)
+                .to(torch.long)
+            )
+            # ntypes * (ntypes) * nt
+            type_embedding_i = torch.tile(
+                type_embedding.view(ntypes_with_padding, 1, nt),
+                [1, ntypes_with_padding, 1],
+            )
+            # (ntypes) * ntypes * nt
+            type_embedding_j = torch.tile(
+                type_embedding.view(1, ntypes_with_padding, nt),
+                [ntypes_with_padding, 1, 1],
+            )
+            # (ntypes * ntypes) * (nt+nt)
+            two_side_type_embedding = torch.cat(
+                [type_embedding_i, type_embedding_j], -1
+            ).reshape(-1, nt * 2)
+            tt_full = self.filter_layers_strip.networks[0](two_side_type_embedding)
+            # (nfnl x nt_i x nt_j) x ng
+            gg_t = torch.gather(tt_full, dim=0, index=idx)
+            # (nfnl x nt_i x nt_j) x ng
+            gg_t = gg_t.reshape(nfnl, nnei, nnei, ng)
             if self.smooth:
                 gg_t = (
                     gg_t
@@ -848,7 +898,7 @@ class DescrptBlockSeTTebd(DescriptorBlock):
         # nf x nl x ng
         result = res_ij.view(nframes, nloc, self.filter_neuron[-1])
         return (
-            result.to(dtype=env.GLOBAL_PT_FLOAT_PRECISION),
+            result,
             None,
             None,
             None,

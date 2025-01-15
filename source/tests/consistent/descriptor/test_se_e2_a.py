@@ -2,7 +2,6 @@
 import unittest
 from typing import (
     Any,
-    Tuple,
 )
 
 import numpy as np
@@ -13,6 +12,9 @@ from deepmd.env import (
 )
 
 from ..common import (
+    INSTALLED_ARRAY_API_STRICT,
+    INSTALLED_JAX,
+    INSTALLED_PD,
     INSTALLED_PT,
     INSTALLED_TF,
     CommonTest,
@@ -30,9 +32,24 @@ if INSTALLED_TF:
     from deepmd.tf.descriptor.se_a import DescrptSeA as DescrptSeATF
 else:
     DescrptSeATF = None
+if INSTALLED_PD:
+    from deepmd.pd.model.descriptor.se_a import DescrptSeA as DescrptSeAPD
+else:
+    DescrptSeAPD = None
 from deepmd.utils.argcheck import (
     descrpt_se_a_args,
 )
+
+if INSTALLED_JAX:
+    from deepmd.jax.descriptor.se_e2_a import DescrptSeA as DescrptSeAJAX
+else:
+    DescrptSeAJAX = None
+if INSTALLED_ARRAY_API_STRICT:
+    from ...array_api_strict.descriptor.se_e2_a import (
+        DescrptSeA as DescrptSeAArrayAPIStrict,
+    )
+else:
+    DescrptSeAArrayAPIStrict = None
 
 
 @parameterized(
@@ -99,12 +116,48 @@ class TestSeA(CommonTest, DescriptorTest, unittest.TestCase):
         ) = self.param
         return env_protection != 0.0
 
+    @property
+    def skip_jax(self) -> bool:
+        (
+            resnet_dt,
+            type_one_side,
+            excluded_types,
+            precision,
+            env_protection,
+        ) = self.param
+        return not type_one_side or not INSTALLED_JAX
+
+    @property
+    def skip_pd(self) -> bool:
+        (
+            resnet_dt,
+            type_one_side,
+            excluded_types,
+            precision,
+            env_protection,
+        ) = self.param
+        return not INSTALLED_PD
+
+    @property
+    def skip_array_api_strict(self) -> bool:
+        (
+            resnet_dt,
+            type_one_side,
+            excluded_types,
+            precision,
+            env_protection,
+        ) = self.param
+        return not type_one_side or not INSTALLED_ARRAY_API_STRICT
+
     tf_class = DescrptSeATF
     dp_class = DescrptSeADP
     pt_class = DescrptSeAPT
+    jax_class = DescrptSeAJAX
+    pd_class = DescrptSeAPD
+    array_api_strict_class = DescrptSeAArrayAPIStrict
     args = descrpt_se_a_args()
 
-    def setUp(self):
+    def setUp(self) -> None:
         CommonTest.setUp(self)
 
         self.ntypes = 2
@@ -150,7 +203,7 @@ class TestSeA(CommonTest, DescriptorTest, unittest.TestCase):
             self.atype = self.atype[idx]
             self.coords = self.coords.reshape(-1, 3)[idx].ravel()
 
-    def build_tf(self, obj: Any, suffix: str) -> Tuple[list, dict]:
+    def build_tf(self, obj: Any, suffix: str) -> tuple[list, dict]:
         return self.build_tf_descriptor(
             obj,
             self.natoms,
@@ -178,7 +231,34 @@ class TestSeA(CommonTest, DescriptorTest, unittest.TestCase):
             self.box,
         )
 
-    def extract_ret(self, ret: Any, backend) -> Tuple[np.ndarray, ...]:
+    def eval_jax(self, jax_obj: Any) -> Any:
+        return self.eval_jax_descriptor(
+            jax_obj,
+            self.natoms,
+            self.coords,
+            self.atype,
+            self.box,
+        )
+
+    def eval_pd(self, pd_obj: Any) -> Any:
+        return self.eval_pd_descriptor(
+            pd_obj,
+            self.natoms,
+            self.coords,
+            self.atype,
+            self.box,
+        )
+
+    def eval_array_api_strict(self, array_api_strict_obj: Any) -> Any:
+        return self.eval_array_api_strict_descriptor(
+            array_api_strict_obj,
+            self.natoms,
+            self.coords,
+            self.atype,
+            self.box,
+        )
+
+    def extract_ret(self, ret: Any, backend) -> tuple[np.ndarray, ...]:
         return (ret[0],)
 
     @property

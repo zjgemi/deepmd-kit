@@ -31,12 +31,12 @@ dtype = env.GLOBAL_PT_FLOAT_PRECISION
 
 # to be merged with the tf test case
 class TestDescrptSeT(unittest.TestCase, TestCaseSingleFrameWithNlist):
-    def setUp(self):
+    def setUp(self) -> None:
         TestCaseSingleFrameWithNlist.setUp(self)
 
     def test_consistency(
         self,
-    ):
+    ) -> None:
         rng = np.random.default_rng(GLOBAL_SEED)
         nf, nloc, nnei = self.nlist.shape
         davg = rng.normal(size=(self.nt, nnei, 4))
@@ -63,6 +63,7 @@ class TestDescrptSeT(unittest.TestCase, TestCaseSingleFrameWithNlist):
                 precision=prec,
                 resnet_dt=idt,
                 exclude_types=em,
+                seed=GLOBAL_SEED,
             ).to(env.DEVICE)
             dd0.seat.mean = torch.tensor(davg, dtype=dtype, device=env.DEVICE)
             dd0.seat.dstd = torch.tensor(dstd, dtype=dtype, device=env.DEVICE)
@@ -110,7 +111,7 @@ class TestDescrptSeT(unittest.TestCase, TestCaseSingleFrameWithNlist):
 
     def test_jit(
         self,
-    ):
+    ) -> None:
         rng = np.random.default_rng(GLOBAL_SEED)
         nf, nloc, nnei = self.nlist.shape
         davg = rng.normal(size=(self.nt, nnei, 4))
@@ -131,6 +132,7 @@ class TestDescrptSeT(unittest.TestCase, TestCaseSingleFrameWithNlist):
                 self.sel,
                 precision=prec,
                 resnet_dt=idt,
+                seed=GLOBAL_SEED,
             )
             dd0.seat.mean = torch.tensor(davg, dtype=dtype, device=env.DEVICE)
             dd0.seat.dstd = torch.tensor(dstd, dtype=dtype, device=env.DEVICE)

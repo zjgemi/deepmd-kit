@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 from typing import (
-    Dict,
     Optional,
 )
 
@@ -8,7 +7,7 @@ from typing import (
 def format_training_message(
     batch: int,
     wall_time: float,
-):
+) -> str:
     """Format a training message."""
     return f"batch {batch:7d}: " f"total wall time = {wall_time:.2f} s"
 
@@ -16,9 +15,9 @@ def format_training_message(
 def format_training_message_per_task(
     batch: int,
     task_name: str,
-    rmse: Dict[str, float],
+    rmse: dict[str, float],
     learning_rate: Optional[float],
-):
+) -> str:
     if task_name:
         task_name += ": "
     if learning_rate is None:

@@ -34,7 +34,9 @@ input_files = (
     p_examples / "water" / "hybrid" / "input.json",
     p_examples / "water" / "dplr" / "train" / "dw.json",
     p_examples / "water" / "dplr" / "train" / "ener.json",
+    p_examples / "water" / "d3" / "input_pt.json",
     p_examples / "water" / "linear" / "input.json",
+    p_examples / "water" / "linear" / "input_pt.json",
     p_examples / "nopbc" / "train" / "input.json",
     p_examples / "water_tensor" / "dipole" / "dipole_input.json",
     p_examples / "water_tensor" / "polar" / "polar_input.json",
@@ -52,17 +54,22 @@ input_files = (
     p_examples / "dprc" / "generalized_force" / "input.json",
     p_examples / "water" / "se_e2_a" / "input_torch.json",
     p_examples / "water" / "se_atten" / "input_torch.json",
-    p_examples / "water" / "dpa2" / "input_torch.json",
+    p_examples / "water" / "dpa2" / "input_torch_small.json",
+    p_examples / "water" / "dpa2" / "input_torch_medium.json",
+    p_examples / "water" / "dpa2" / "input_torch_large.json",
+    p_examples / "water" / "dpa2" / "input_torch_compressible.json",
+    p_examples / "property" / "train" / "input_torch.json",
     p_examples / "water" / "se_e3_tebd" / "input_torch.json",
 )
 
 input_files_multi = (
     p_examples / "water_multi_task" / "pytorch_example" / "input_torch.json",
+    p_examples / "water_multi_task" / "pytorch_example" / "input_torch_sharefit.json",
 )
 
 
 class TestExamples(unittest.TestCase):
-    def test_arguments(self):
+    def test_arguments(self) -> None:
         for fn in input_files + input_files_multi:
             multi_task = fn in input_files_multi
             fn = str(fn)

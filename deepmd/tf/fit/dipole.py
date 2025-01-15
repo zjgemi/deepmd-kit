@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 from typing import (
-    List,
     Optional,
 )
 
@@ -30,6 +29,9 @@ from deepmd.tf.utils.network import (
     one_layer,
     one_layer_rand_seed_shift,
 )
+from deepmd.utils.data import (
+    DataRequirementItem,
+)
 from deepmd.utils.version import (
     check_version_compatibility,
 )
@@ -42,17 +44,23 @@ class DipoleFittingSeA(Fitting):
     Parameters
     ----------
     ntypes
-            The ntypes of the descrptor :math:`\mathcal{D}`
+            The ntypes of the descriptor :math:`\mathcal{D}`
     dim_descrpt
-            The dimension of the descrptor :math:`\mathcal{D}`
+            The dimension of the descriptor :math:`\mathcal{D}`
     embedding_width
-            The rotation matrix dimension of the descrptor :math:`\mathcal{D}`
-    neuron : List[int]
+            The rotation matrix dimension of the descriptor :math:`\mathcal{D}`
+    neuron : list[int]
             Number of neurons in each hidden layer of the fitting net
     resnet_dt : bool
             Time-step `dt` in the resnet construction:
             y = x + dt * \phi (Wx + b)
-    sel_type : List[int]
+    numb_fparam
+            Number of frame parameters
+    numb_aparam
+            Number of atomic parameters
+    dim_case_embd
+            Dimension of case specific embedding.
+    sel_type : list[int]
             The atom types selected to have an atomic dipole prediction. If is None, all atoms are selected.
     seed : int
             Random seed for initializing the network parameters.
@@ -65,7 +73,7 @@ class DipoleFittingSeA(Fitting):
     mixed_types : bool
         If true, use a uniform fitting net for all atom types, otherwise use
         different fitting nets for different atom types.
-    type_map: List[str], Optional
+    type_map: list[str], Optional
             A list of strings. Give the name to each type of atoms.
     """
 
@@ -74,15 +82,18 @@ class DipoleFittingSeA(Fitting):
         ntypes: int,
         dim_descrpt: int,
         embedding_width: int,
-        neuron: List[int] = [120, 120, 120],
+        neuron: list[int] = [120, 120, 120],
         resnet_dt: bool = True,
-        sel_type: Optional[List[int]] = None,
+        numb_fparam: int = 0,
+        numb_aparam: int = 0,
+        dim_case_embd: int = 0,
+        sel_type: Optional[list[int]] = None,
         seed: Optional[int] = None,
         activation_function: str = "tanh",
         precision: str = "default",
         uniform_seed: bool = False,
         mixed_types: bool = False,
-        type_map: Optional[List[str]] = None,  # to be compat with input
+        type_map: Optional[list[str]] = None,  # to be compat with input
         **kwargs,
     ) -> None:
         """Constructor."""
@@ -109,6 +120,21 @@ class DipoleFittingSeA(Fitting):
         self.mixed_prec = None
         self.mixed_types = mixed_types
         self.type_map = type_map
+        self.numb_fparam = numb_fparam
+        self.numb_aparam = numb_aparam
+        self.dim_case_embd = dim_case_embd
+        if numb_fparam > 0:
+            raise ValueError("numb_fparam is not supported in the dipole fitting")
+        if numb_aparam > 0:
+            raise ValueError("numb_aparam is not supported in the dipole fitting")
+        if dim_case_embd > 0:
+            raise ValueError("dim_case_embd is not supported in TensorFlow.")
+        self.fparam_avg = None
+        self.fparam_std = None
+        self.fparam_inv_std = None
+        self.aparam_avg = None
+        self.aparam_std = None
+        self.aparam_inv_std = None
 
     def get_sel_type(self) -> int:
         """Get selected type."""
@@ -321,7 +347,7 @@ class DipoleFittingSeA(Fitting):
         )
 
     def enable_mixed_precision(self, mixed_prec: Optional[dict] = None) -> None:
-        """Reveive the mixed precision setting.
+        """Receive the mixed precision setting.
 
         Parameters
         ----------
@@ -365,7 +391,7 @@ class DipoleFittingSeA(Fitting):
         data = {
             "@class": "Fitting",
             "type": "dipole",
-            "@version": 2,
+            "@version": 3,
             "ntypes": self.ntypes,
             "dim_descrpt": self.dim_descrpt,
             "embedding_width": self.dim_rot_mat_1,
@@ -373,6 +399,9 @@ class DipoleFittingSeA(Fitting):
             "dim_out": 3,
             "neuron": self.n_neuron,
             "resnet_dt": self.resnet_dt,
+            "numb_fparam": self.numb_fparam,
+            "numb_aparam": self.numb_aparam,
+            "dim_case_embd": self.dim_case_embd,
             "activation_function": self.activation_function_name,
             "precision": self.fitting_precision.name,
             "exclude_types": [],
@@ -406,10 +435,36 @@ class DipoleFittingSeA(Fitting):
             The deserialized model
         """
         data = data.copy()
-        check_version_compatibility(data.pop("@version", 1), 2, 1)
+        check_version_compatibility(data.pop("@version", 1), 3, 1)
         fitting = cls(**data)
         fitting.fitting_net_variables = cls.deserialize_network(
             data["nets"],
             suffix=suffix,
         )
         return fitting
+
+    @property
+    def input_requirement(self) -> list[DataRequirementItem]:
+        """Return data requirements needed for the model input."""
+        data_requirement = []
+        if self.numb_fparam > 0:
+            data_requirement.append(
+                DataRequirementItem(
+                    "fparam", self.numb_fparam, atomic=False, must=True, high_prec=False
+                )
+            )
+        if self.numb_aparam > 0:
+            data_requirement.append(
+                DataRequirementItem(
+                    "aparam", self.numb_aparam, atomic=True, must=True, high_prec=False
+                )
+            )
+        return data_requirement
+
+    def get_numb_fparam(self) -> int:
+        """Get the number of frame parameters."""
+        return self.numb_fparam
+
+    def get_numb_aparam(self) -> int:
+        """Get the number of atomic parameters."""
+        return self.numb_aparam

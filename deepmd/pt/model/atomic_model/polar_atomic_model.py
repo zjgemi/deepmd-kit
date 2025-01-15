@@ -1,7 +1,4 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-from typing import (
-    Dict,
-)
 
 import torch
 
@@ -16,12 +13,15 @@ from .dp_atomic_model import (
 
 class DPPolarAtomicModel(DPAtomicModel):
     def __init__(self, descriptor, fitting, type_map, **kwargs):
-        assert isinstance(fitting, PolarFittingNet)
+        if not isinstance(fitting, PolarFittingNet):
+            raise TypeError(
+                "fitting must be an instance of PolarFittingNet for DPPolarAtomicModel"
+            )
         super().__init__(descriptor, fitting, type_map, **kwargs)
 
     def apply_out_stat(
         self,
-        ret: Dict[str, torch.Tensor],
+        ret: dict[str, torch.Tensor],
         atype: torch.Tensor,
     ):
         """Apply the stat to each atomic output.
@@ -43,8 +43,12 @@ class DPPolarAtomicModel(DPAtomicModel):
             for kk in self.bias_keys:
                 ntypes = out_bias[kk].shape[0]
                 temp = torch.zeros(ntypes, dtype=dtype, device=device)
-                for i in range(ntypes):
-                    temp[i] = torch.mean(torch.diagonal(out_bias[kk][i].reshape(3, 3)))
+                temp = torch.mean(
+                    torch.diagonal(
+                        out_bias[kk].reshape(ntypes, 3, 3), dim1=-2, dim2=-1
+                    ),
+                    dim=-1,
+                )
                 modified_bias = temp[atype]
 
                 # (nframes, nloc, 1)

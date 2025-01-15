@@ -17,7 +17,7 @@ from torch import (
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
 # managers, so these need to be implemented as builtins. Using these wrappers
-# lets us keep those builtins small and re-usable.
+# lets us keep those builtins small and reusable.
 def _no_grad_uniform_(tensor, a, b, generator=None):
     with torch.no_grad():
         return tensor.uniform_(a, b, generator=generator)
@@ -130,10 +130,8 @@ def calculate_gain(nonlinearity, param=None):
     elif nonlinearity == "leaky_relu":
         if param is None:
             negative_slope = 0.01
-        elif (
-            not isinstance(param, bool)
-            and isinstance(param, int)
-            or isinstance(param, float)
+        elif (not isinstance(param, bool) and isinstance(param, int)) or isinstance(
+            param, float
         ):
             # True/False are instances of int, hence check above
             negative_slope = param

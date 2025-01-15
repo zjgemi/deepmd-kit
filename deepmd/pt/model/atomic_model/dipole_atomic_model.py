@@ -1,7 +1,4 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-from typing import (
-    Dict,
-)
 
 import torch
 
@@ -16,12 +13,15 @@ from .dp_atomic_model import (
 
 class DPDipoleAtomicModel(DPAtomicModel):
     def __init__(self, descriptor, fitting, type_map, **kwargs):
-        assert isinstance(fitting, DipoleFittingNet)
+        if not isinstance(fitting, DipoleFittingNet):
+            raise TypeError(
+                "fitting must be an instance of DipoleFittingNet for DPDipoleAtomicModel"
+            )
         super().__init__(descriptor, fitting, type_map, **kwargs)
 
     def apply_out_stat(
         self,
-        ret: Dict[str, torch.Tensor],
+        ret: dict[str, torch.Tensor],
         atype: torch.Tensor,
     ):
         # dipole not applying bias

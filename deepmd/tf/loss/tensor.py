@@ -1,7 +1,4 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-from typing import (
-    List,
-)
 
 import numpy as np
 
@@ -24,7 +21,7 @@ from .loss import (
 class TensorLoss(Loss):
     """Loss function for tensorial properties."""
 
-    def __init__(self, jdata, **kwarg):
+    def __init__(self, jdata, **kwarg) -> None:
         model = kwarg.get("model", None)
         if model is not None:
             self.type_sel = model.get_sel_type()
@@ -43,6 +40,7 @@ class TensorLoss(Loss):
         # YWolfeee: modify, use pref / pref_atomic, instead of pref_weight / pref_atomic_weight
         self.local_weight = jdata.get("pref_atomic", None)
         self.global_weight = jdata.get("pref", None)
+        self.enable_atomic_weight = jdata.get("enable_atomic_weight", False)
 
         assert (
             self.local_weight is not None and self.global_weight is not None
@@ -69,9 +67,18 @@ class TensorLoss(Loss):
             "global_loss": global_cvt_2_tf_float(0.0),
         }
 
+        if self.enable_atomic_weight:
+            atomic_weight = tf.reshape(label_dict["atom_weight"], [-1, 1])
+        else:
+            atomic_weight = global_cvt_2_tf_float(1.0)
+
         if self.local_weight > 0.0:
+            diff = tf.reshape(polar, [-1, self.tensor_size]) - tf.reshape(
+                atomic_polar_hat, [-1, self.tensor_size]
+            )
+            diff = diff * atomic_weight
             local_loss = global_cvt_2_tf_float(find_atomic) * tf.reduce_mean(
-                tf.square(self.scale * (polar - atomic_polar_hat)), name="l2_" + suffix
+                tf.square(self.scale * diff), name="l2_" + suffix
             )
             more_loss["local_loss"] = self.display_if_exist(local_loss, find_atomic)
             l2_loss += self.local_weight * local_loss
@@ -142,7 +149,7 @@ class TensorLoss(Loss):
         return results
 
     @property
-    def label_requirement(self) -> List[DataRequirementItem]:
+    def label_requirement(self) -> list[DataRequirementItem]:
         """Return data label requirements needed for this loss calculation."""
         data_requirements = []
         # data required
@@ -166,4 +173,16 @@ class TensorLoss(Loss):
                 type_sel=self.type_sel,
             )
         )
+        if self.enable_atomic_weight:
+            data_requirements.append(
+                DataRequirementItem(
+                    "atom_weight",
+                    1,
+                    atomic=True,
+                    must=False,
+                    high_prec=False,
+                    default=1.0,
+                    type_sel=self.type_sel,
+                )
+            )
         return data_requirements
