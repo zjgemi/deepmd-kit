@@ -89,14 +89,13 @@ class GridDensityLoss(TaskLoss):
             l2_density_loss = torch.square(
                 density_label_reshape - density_pred_reshape
             ).mean()
-            if not self.inference:
-                more_loss["l2_density_loss"] = self.display_if_exist(
-                    l2_density_loss.detach(), find_density
-                )
-            loss += (pref_d * l2_density_loss).to(GLOBAL_PT_FLOAT_PRECISION)
             rmse_d = l2_density_loss.sqrt()
             more_loss["rmse_d"] = self.display_if_exist(rmse_d.detach(), find_density)
-            mae_d = torch.abs(density_label_reshape - density_pred_reshape).mean()
+            l1_density_loss = torch.abs(
+                density_label_reshape - density_pred_reshape
+            ).mean()
+            loss += (pref_d * l1_density_loss).to(GLOBAL_PT_FLOAT_PRECISION)
+            mae_d = l1_density_loss
             more_loss["mae_d"] = self.display_if_exist(mae_d.detach(), find_density)
         return model_pred, loss, more_loss
 

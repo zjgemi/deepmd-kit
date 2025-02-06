@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import os
+from datetime import timedelta
 from pathlib import (
     Path,
 )
@@ -108,7 +109,7 @@ def get_trainer(
     local_rank = os.environ.get("LOCAL_RANK")
     if local_rank is not None:
         local_rank = int(local_rank)
-        dist.init_process_group(backend="cuda:nccl,cpu:gloo")
+        dist.init_process_group(backend="cuda:nccl,cpu:gloo", timeout=timedelta(hours=2))
 
     def prepare_trainer_input_single(
         model_params_single, data_dict_single, rank=0, seed=None
